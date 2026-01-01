@@ -19,6 +19,23 @@ const FEED_URLS = {
   'SIR': 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si'
 };
 
+// Service alerts feed
+const ALERTS_URL = 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts';
+
+// Alert cause/effect mappings
+const ALERT_CAUSE = {
+  1: 'Unknown', 2: 'Other', 3: 'Technical Problem', 4: 'Strike',
+  5: 'Demonstration', 6: 'Accident', 7: 'Holiday', 8: 'Weather',
+  9: 'Maintenance', 10: 'Construction', 11: 'Police Activity',
+  12: 'Medical Emergency'
+};
+
+const ALERT_EFFECT = {
+  1: 'No Service', 2: 'Reduced Service', 3: 'Significant Delays',
+  4: 'Detour', 5: 'Additional Service', 6: 'Modified Service',
+  7: 'Other', 8: 'Unknown', 9: 'Stop Moved'
+};
+
 // Line colors
 const LINE_COLORS = {
   '1': '#EE352E', '2': '#EE352E', '3': '#EE352E',
@@ -174,6 +191,66 @@ function getStatusText(status) {
   }
 }
 
+// Extract alerts from feed
+function extractAlerts(feed) {
+  const alerts = [];
+  if (!feed || !feed.entity) return alerts;
+
+  for (const entity of feed.entity) {
+    if (entity.alert) {
+      const a = entity.alert;
+
+      // Get affected routes
+      const affectedRoutes = [];
+      const affectedStops = [];
+
+      if (a.informedEntity) {
+        for (const ie of a.informedEntity) {
+          if (ie.routeId && !affectedRoutes.includes(ie.routeId)) {
+            affectedRoutes.push(ie.routeId);
+          }
+          if (ie.stopId && !affectedStops.includes(ie.stopId)) {
+            affectedStops.push(ie.stopId);
+          }
+        }
+      }
+
+      // Extract text (can be in translation array)
+      const headerText = a.headerText?.translation?.[0]?.text || a.headerText?.text || '';
+      const descriptionText = a.descriptionText?.translation?.[0]?.text || a.descriptionText?.text || '';
+
+      // Get time range
+      const activePeriod = a.activePeriod?.[0];
+      const startTime = activePeriod?.start?.low || activePeriod?.start;
+      const endTime = activePeriod?.end?.low || activePeriod?.end;
+
+      alerts.push({
+        id: entity.id,
+        header: headerText,
+        description: descriptionText,
+        cause: ALERT_CAUSE[a.cause] || 'Unknown',
+        effect: ALERT_EFFECT[a.effect] || 'Unknown',
+        affectedRoutes,
+        affectedStops,
+        startTime,
+        endTime,
+        severity: getSeverity(a.effect, affectedRoutes.length)
+      });
+    }
+  }
+
+  return alerts;
+}
+
+function getSeverity(effect, routeCount) {
+  // Higher severity for service-impacting alerts
+  if (effect === 1) return 'critical';  // No Service
+  if (effect === 3) return 'high';      // Significant Delays
+  if (effect === 2 || effect === 4) return 'medium';  // Reduced/Detour
+  if (routeCount > 3) return 'medium';
+  return 'low';
+}
+
 // API endpoint to get all train positions
 app.get('/api/trains', async (req, res) => {
   try {
@@ -211,6 +288,27 @@ app.get('/api/trains', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching trains:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// API endpoint for alerts
+app.get('/api/alerts', async (req, res) => {
+  try {
+    const feed = await fetchFeed(ALERTS_URL);
+    const alerts = extractAlerts(feed);
+
+    // Sort by severity
+    const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+    alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+    res.json({
+      timestamp: Date.now(),
+      alertCount: alerts.length,
+      alerts: alerts
+    });
+  } catch (error) {
+    console.error('Error fetching alerts:', error);
     res.status(500).json({ error: error.message });
   }
 });
