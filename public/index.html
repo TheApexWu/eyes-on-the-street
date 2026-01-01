@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NYC MTA Live Subway Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+
+    #map {
+      width: 100vw;
+      height: 100vh;
+    }
+
+    .header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 12px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      backdrop-filter: blur(10px);
+    }
+
+    .header h1 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .header .subtitle {
+      font-size: 12px;
+      opacity: 0.7;
+      margin-left: 12px;
+    }
+
+    .stats {
+      display: flex;
+      gap: 20px;
+      font-size: 13px;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .stat-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .stat-dot.live { background: #00ff88; }
+    .stat-dot.loading { background: #ffaa00; }
+    .stat-dot.error { background: #ff4444; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .legend {
+      position: absolute;
+      bottom: 30px;
+      left: 20px;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 12px;
+      backdrop-filter: blur(10px);
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .legend h3 {
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-circle {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: bold;
+      color: white;
+    }
+
+    .train-marker {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid white;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: bold;
+      color: white;
+      transition: transform 0.3s;
+    }
+
+    .train-marker:hover {
+      transform: scale(1.2);
+    }
+
+    .station-marker {
+      width: 8px;
+      height: 8px;
+      background: white;
+      border: 2px solid #333;
+      border-radius: 50%;
+    }
+
+    .info-panel {
+      position: absolute;
+      bottom: 30px;
+      right: 20px;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      font-size: 12px;
+      backdrop-filter: blur(10px);
+      max-width: 280px;
+    }
+
+    .info-panel h3 {
+      margin-bottom: 8px;
+    }
+
+    .info-panel p {
+      opacity: 0.8;
+      line-height: 1.5;
+    }
+
+    .refresh-btn {
+      position: absolute;
+      top: 70px;
+      right: 20px;
+      z-index: 1000;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      backdrop-filter: blur(10px);
+    }
+
+    .refresh-btn:hover {
+      background: rgba(40, 40, 40, 0.9);
+    }
+
+    .leaflet-popup-content-wrapper {
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      border-radius: 8px;
+    }
+
+    .leaflet-popup-tip {
+      background: rgba(0, 0, 0, 0.9);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div style="display: flex; align-items: center;">
+      <h1>NYC MTA Live Subway Map</h1>
+      <span class="subtitle">Real-time train positions</span>
+    </div>
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-dot live" id="statusDot"></div>
+        <span id="statusText">Connecting...</span>
+      </div>
+      <div class="stat">
+        <span id="trainCount">0 trains</span>
+      </div>
+      <div class="stat">
+        <span id="lastUpdate">--</span>
+      </div>
+    </div>
+  </div>
+
+  <button class="refresh-btn" onclick="fetchTrains()">Refresh Now</button>
+
+  <div id="map"></div>
+
+  <div class="legend">
+    <h3>Subway Lines</h3>
+    <div class="legend-grid">
+      <div class="legend-item"><div class="legend-circle" style="background:#EE352E">1</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#EE352E">2</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#EE352E">3</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#00933C">4</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#00933C">5</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#00933C">6</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#B933AD">7</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#0039A6">A</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#0039A6">C</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#0039A6">E</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">B</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">D</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">F</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">M</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#6CBE45">G</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#996633">J</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#996633">Z</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#A7A9AC">L</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">N</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">Q</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">R</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">W</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#808183">S</div></div>
+      <div class="legend-item"><div class="legend-circle" style="background:#0039A6;font-size:8px">SIR</div></div>
+    </div>
+  </div>
+
+  <div class="info-panel">
+    <h3>About</h3>
+    <p>Real-time train positions from MTA GTFS-RT feeds. Trains update every 30 seconds. Click on trains for details.</p>
+    <p style="margin-top: 8px; font-size: 11px; opacity: 0.6;">Data source: api.mta.info</p>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    // Initialize map centered on NYC
+    const map = L.map('map', {
+      zoomControl: true
+    }).setView([40.7580, -73.9855], 12);
+
+    // Dark map tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      maxZoom: 19
+    }).addTo(map);
+
+    // Line colors
+    const LINE_COLORS = {
+      '1': '#EE352E', '2': '#EE352E', '3': '#EE352E',
+      '4': '#00933C', '5': '#00933C', '6': '#00933C', '6X': '#00933C',
+      '7': '#B933AD', '7X': '#B933AD',
+      'A': '#0039A6', 'C': '#0039A6', 'E': '#0039A6',
+      'B': '#FF6319', 'D': '#FF6319', 'F': '#FF6319', 'FX': '#FF6319', 'M': '#FF6319',
+      'G': '#6CBE45',
+      'J': '#996633', 'Z': '#996633',
+      'L': '#A7A9AC',
+      'N': '#FCCC0A', 'Q': '#FCCC0A', 'R': '#FCCC0A', 'W': '#FCCC0A',
+      'S': '#808183', 'SF': '#808183', 'SR': '#808183', 'H': '#808183', 'FS': '#808183',
+      'SI': '#0039A6', 'SIR': '#0039A6'
+    };
+
+    // Store train markers
+    let trainMarkers = {};
+    let stationMarkers = [];
+
+    // Create custom train icon
+    function createTrainIcon(routeId, color) {
+      const textColor = ['N', 'Q', 'R', 'W'].includes(routeId) ? '#000' : '#fff';
+      const displayRoute = routeId.replace('X', '');
+
+      return L.divIcon({
+        className: 'train-icon',
+        html: `<div class="train-marker" style="background:${color}">${displayRoute}</div>`,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+    }
+
+    // Fetch and display trains
+    async function fetchTrains() {
+      const statusDot = document.getElementById('statusDot');
+      const statusText = document.getElementById('statusText');
+
+      statusDot.className = 'stat-dot loading';
+      statusText.textContent = 'Updating...';
+
+      try {
+        const response = await fetch('/api/trains');
+        const data = await response.json();
+
+        // Update stats
+        document.getElementById('trainCount').textContent = `${data.trainCount} trains`;
+        document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
+
+        statusDot.className = 'stat-dot live';
+        statusText.textContent = 'Live';
+
+        // Clear old markers that no longer exist
+        const currentIds = new Set(data.trains.map(t => t.id));
+        Object.keys(trainMarkers).forEach(id => {
+          if (!currentIds.has(id)) {
+            map.removeLayer(trainMarkers[id]);
+            delete trainMarkers[id];
+          }
+        });
+
+        // Update or add train markers
+        data.trains.forEach(train => {
+          const color = LINE_COLORS[train.routeId] || train.color || '#666';
+
+          if (trainMarkers[train.id]) {
+            // Update existing marker position
+            trainMarkers[train.id].setLatLng([train.latitude, train.longitude]);
+          } else {
+            // Create new marker
+            const marker = L.marker([train.latitude, train.longitude], {
+              icon: createTrainIcon(train.routeId, color)
+            });
+
+            const etaText = train.eta !== null && train.eta !== undefined
+              ? (train.eta <= 0 ? 'Arriving now' : `${train.eta} min`)
+              : '';
+
+            marker.bindPopup(`
+              <div style="text-align:center;min-width:120px;">
+                <div style="font-size:24px;font-weight:bold;margin-bottom:8px;">
+                  <span style="background:${color};padding:4px 12px;border-radius:12px;">${train.routeId}</span>
+                </div>
+                ${train.stopName ? `<div style="font-size:13px;margin-bottom:4px;"><b>${train.stopName}</b></div>` : ''}
+                ${etaText ? `<div style="font-size:14px;color:#00ff88;">${etaText}</div>` : ''}
+                ${train.source === 'gps' ? '<div style="font-size:10px;opacity:0.6;margin-top:4px;">GPS tracking</div>' : ''}
+              </div>
+            `);
+
+            marker.addTo(map);
+            trainMarkers[train.id] = marker;
+          }
+        });
+
+        console.log(`Updated ${data.trainCount} train positions`);
+
+      } catch (error) {
+        console.error('Error fetching trains:', error);
+        statusDot.className = 'stat-dot error';
+        statusText.textContent = 'Error';
+      }
+    }
+
+    // Load subway stations
+    async function loadStations() {
+      try {
+        const response = await fetch('https://data.ny.gov/api/views/39hk-dx4f/rows.json?accessType=DOWNLOAD');
+        const data = await response.json();
+
+        // Parse station data
+        const columns = data.meta.view.columns;
+        const latIdx = columns.findIndex(c => c.fieldName === 'gtfs_latitude');
+        const lonIdx = columns.findIndex(c => c.fieldName === 'gtfs_longitude');
+        const nameIdx = columns.findIndex(c => c.fieldName === 'stop_name');
+        const routesIdx = columns.findIndex(c => c.fieldName === 'daytime_routes');
+
+        data.data.forEach(row => {
+          const lat = parseFloat(row[latIdx]);
+          const lon = parseFloat(row[lonIdx]);
+          const name = row[nameIdx];
+          const routes = row[routesIdx];
+
+          if (lat && lon) {
+            const marker = L.circleMarker([lat, lon], {
+              radius: 4,
+              fillColor: '#fff',
+              color: '#333',
+              weight: 1,
+              opacity: 0.8,
+              fillOpacity: 0.9
+            });
+
+            marker.bindPopup(`<b>${name}</b><br>${routes}`);
+            marker.addTo(map);
+            stationMarkers.push(marker);
+          }
+        });
+
+        console.log(`Loaded ${stationMarkers.length} stations`);
+      } catch (error) {
+        console.error('Error loading stations:', error);
+      }
+    }
+
+    // Initial load
+    loadStations();
+    fetchTrains();
+
+    // Auto-refresh every 30 seconds
+    setInterval(fetchTrains, 30000);
+  </script>
+</body>
+</html>
