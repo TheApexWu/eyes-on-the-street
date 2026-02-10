@@ -1,144 +1,66 @@
-// EYES ON THE STREET v2 - Station Pulse Rings (Mapbox GL)
-// Draws expanding ring animations on a canvas overlay when trains arrive at stations.
-// Station dots and click detection are handled by Mapbox GL's native layers in app.js.
-
+// Station pulse rings on canvas overlay. Train arrivals trigger expanding ring animations.
 const StationLayer = (() => {
-  let canvas, ctx;
-  let map;
-  let stationData = [];
-  let pulseRings = [];
-  let previousTrainStops = new Set();
-  let animFrame = null;
-  let running = false;
+  let canvas, ctx, map;
+  let stations = [];
+  let rings = [];
+  let prevStops = new Set();
+  let animFrame = null, running = false;
 
-  const RING_DURATION = 90;
-  const RING_MAX_RADIUS = 40;
-  const RING_LINE_WIDTH = 1.5;
-  const ANOMALY_PULSE_SPEED = 2;
-
-  function createRing(lat, lon, isAnomaly) {
-    return {
-      lat, lon,
-      age: 0,
-      maxAge: RING_DURATION,
-      isAnomaly,
-      speed: isAnomaly ? ANOMALY_PULSE_SPEED : 1
-    };
-  }
+  const DURATION = 90, MAX_R = 40, LINE_W = 1.5, ANOM_SPEED = 2;
 
   function render() {
-    if (!ctx || !canvas || !map) return;
+    if (!ctx || !map) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    const zoom = map.getZoom();
-    const scaleFactor = Math.pow(1.2, zoom - 12);
-
-    const aliveRings = [];
-    for (const ring of pulseRings) {
-      ring.age += ring.speed;
-      if (ring.age >= ring.maxAge) continue;
-
-      // Mapbox GL: project([lng, lat]) returns {x, y}
-      const point = map.project([ring.lon, ring.lat]);
-      const progress = ring.age / ring.maxAge;
-      const radius = progress * RING_MAX_RADIUS * scaleFactor;
-      const alpha = 1 - progress;
-
+    const scale = Math.pow(1.2, map.getZoom() - 12);
+    const alive = [];
+    for (const r of rings) {
+      r.age += r.speed;
+      if (r.age >= r.max) continue;
+      const pt = map.project([r.lon, r.lat]);
+      const p = r.age / r.max;
       ctx.beginPath();
-      ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-      ctx.strokeStyle = ring.isAnomaly
-        ? `rgba(255, 34, 68, ${alpha * 0.6})`
-        : `rgba(255, 255, 255, ${alpha * 0.5})`;
-      ctx.lineWidth = RING_LINE_WIDTH * (1 - progress * 0.5);
+      ctx.arc(pt.x, pt.y, p * MAX_R * scale, 0, Math.PI * 2);
+      ctx.strokeStyle = r.anom ? `rgba(255,34,68,${(1-p)*0.6})` : `rgba(255,255,255,${(1-p)*0.5})`;
+      ctx.lineWidth = LINE_W * (1 - p * 0.5);
       ctx.stroke();
-
-      aliveRings.push(ring);
+      alive.push(r);
     }
-    pulseRings = aliveRings;
+    rings = alive;
   }
 
-  function frame() {
-    if (!running) return;
-    render();
-    animFrame = requestAnimationFrame(frame);
-  }
+  function frame() { if (!running) return; render(); animFrame = requestAnimationFrame(frame); }
 
-  function resizeCanvas() {
+  function resize() {
     if (!canvas || !map) return;
-    const container = map.getContainer();
-    canvas.width = container.clientWidth;
-    canvas.height = container.clientHeight;
-  }
-
-  function detectArrivals(trains) {
-    const currentStops = new Set();
-    const arrivals = [];
-
-    for (const train of trains) {
-      if (train.status === 'At Station' || train.status === 'Incoming') {
-        const stopId = train.stopId?.replace(/[NS]$/, '');
-        if (stopId) currentStops.add(stopId);
-      }
-    }
-
-    for (const stopId of currentStops) {
-      if (!previousTrainStops.has(stopId)) {
-        arrivals.push(stopId);
-      }
-    }
-
-    previousTrainStops = currentStops;
-    return arrivals;
+    const c = map.getContainer();
+    canvas.width = c.clientWidth;
+    canvas.height = c.clientHeight;
   }
 
   return {
-    init(mapboxMap) {
-      map = mapboxMap;
-      canvas = document.getElementById('pulseCanvas');
+    init(m) {
+      map = m; canvas = document.getElementById('pulseCanvas');
       if (!canvas) return;
       ctx = canvas.getContext('2d');
-
-      resizeCanvas();
-      map.on('resize', resizeCanvas);
-
-      running = true;
-      frame();
+      resize(); map.on('resize', resize);
+      running = true; frame();
     },
-
-    setStations(stations) {
-      stationData = stations;
-    },
-
+    setStations(s) { stations = s; },
     onTrainUpdate(trains) {
-      const arrivals = detectArrivals(trains);
-      if (arrivals.length === 0) return;
-
-      for (const stopId of arrivals) {
-        let found = null;
-        for (const s of stationData) {
-          if (s.id === stopId) {
-            found = s;
-            break;
-          }
+      const cur = new Set();
+      for (const t of trains) {
+        if (t.status === 'At Station' || t.status === 'Incoming') {
+          const id = t.stopId?.replace(/[NS]$/, '');
+          if (id) cur.add(id);
         }
-        if (!found) continue;
-        pulseRings.push(createRing(found.lat, found.lon, found.isAnomaly));
       }
+      for (const id of cur) {
+        if (prevStops.has(id)) continue;
+        const s = stations.find(s => s.id === id);
+        if (s) rings.push({ lat: s.lat, lon: s.lon, age: 0, max: DURATION, anom: s.isAnomaly, speed: s.isAnomaly ? ANOM_SPEED : 1 });
+      }
+      prevStops = cur;
     },
-
-    pulse(lat, lon, isAnomaly) {
-      pulseRings.push(createRing(lat, lon, isAnomaly || false));
-    },
-
-    stop() {
-      running = false;
-      if (animFrame) cancelAnimationFrame(animFrame);
-    },
-
-    start() {
-      if (running) return;
-      running = true;
-      frame();
-    }
+    pulse(lat, lon, anom) { rings.push({ lat, lon, age: 0, max: DURATION, anom: !!anom, speed: anom ? ANOM_SPEED : 1 }); }
   };
 })();

@@ -1,7 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const Anthropic = require('@anthropic-ai/sdk');
+const AnthropicModule = require('@anthropic-ai/sdk');
+const Anthropic = AnthropicModule.default || AnthropicModule;
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
 const fs = require('fs');
 const path = require('path');
@@ -602,12 +603,13 @@ Write the situation report.`
 
     res.json(intelligenceCache);
   } catch (err) {
-    console.error('[intelligence] error:', err.message);
+    console.error('[intelligence] error:', err.message, err.status || '', err.error || '');
     res.json({
       report: null,
       anomalies: [],
       generated: now,
-      error: 'Analysis temporarily unavailable'
+      error: 'Analysis temporarily unavailable',
+      debug: process.env.VERCEL ? err.message : undefined
     });
   }
 });
@@ -632,12 +634,27 @@ app.get('/health', (req, res) => {
   res.sendStatus(200);
 });
 
-// ---------------------------------------------------------------------------
-// START
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// INIT + EXPORT
-// ---------------------------------------------------------------------------
+// Diagnostic: check what's happening with the intelligence pipeline
+app.get('/api/debug', (req, res) => {
+  const hasKey = !!process.env.ANTHROPIC_API_KEY;
+  const keyPrefix = hasKey ? process.env.ANTHROPIC_API_KEY.substring(0, 12) + '...' : 'MISSING';
+  const hasModel = !!ridershipModel && Object.keys(ridershipModel.stations || {}).length > 0;
+  const hasCrime = !!crimeModel && Object.keys(crimeModel.stationRisk || {}).length > 0;
+  const hasPresenceCache = !!cache['presence'];
+  const hasIntelCache = !!intelligenceCache;
+  res.json({
+    anthropicKey: keyPrefix,
+    ridershipModel: hasModel ? Object.keys(ridershipModel.stations).length + ' stations' : 'NOT LOADED',
+    crimeModel: hasCrime ? Object.keys(crimeModel.stationRisk).length + ' stations' : 'NOT LOADED',
+    presenceCached: hasPresenceCache,
+    intelligenceCached: hasIntelCache,
+    intelligenceCacheAge: hasIntelCache ? Math.round((Date.now() - intelligenceCacheTs) / 1000) + 's' : null,
+    env: process.env.VERCEL ? 'vercel' : 'local',
+    nodeVersion: process.version
+  });
+});
+
+// Init + export
 loadRidershipModel();
 loadCrimeModel();
 const stationInit = loadStations();
