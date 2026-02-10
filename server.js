@@ -4,11 +4,74 @@ const cors = require('cors');
 const AnthropicModule = require('@anthropic-ai/sdk');
 const Anthropic = AnthropicModule.default || AnthropicModule;
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
+const { Redis } = require('@upstash/redis');
+const rateLimit = require('express-rate-limit');
+const compression = require('compression');
 const fs = require('fs');
 const path = require('path');
 
+// ---------------------------------------------------------------------------
+// PERSISTENT STATE (Upstash Redis — optional, degrades gracefully)
+// ---------------------------------------------------------------------------
+let redis = null;
+if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+  redis = new Redis({
+    url: process.env.KV_REST_API_URL,
+    token: process.env.KV_REST_API_TOKEN
+  });
+  console.log('[redis] connected');
+}
+
+async function persistHistory(history) {
+  if (!redis) return;
+  try {
+    await redis.set('intel:history', JSON.stringify(history), { ex: 86400 }); // 24h TTL
+  } catch (err) {
+    console.error('[redis] persist failed:', err.message);
+  }
+}
+
+async function loadHistory() {
+  if (!redis) return [];
+  try {
+    const data = await redis.get('intel:history');
+    if (data) {
+      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+      console.log(`[redis] loaded ${parsed.length} historical reports`);
+      return parsed;
+    }
+  } catch (err) {
+    console.error('[redis] load failed:', err.message);
+  }
+  return [];
+}
+
 const app = express();
-app.use(cors());
+app.disable('x-powered-by');
+app.use(compression());
+// Security: restrict CORS to known origins in production
+const ALLOWED_ORIGINS = [
+  'https://eyes-on-the-street.vercel.app',
+  'https://eyes-on-the-street-theapexwu-alex-wus-projects-d73741ee.vercel.app'
+];
+app.use(cors({
+  origin: process.env.VERCEL
+    ? (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin))
+    : true  // Allow all in local dev
+}));
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), interest-cohort=()');
+  if (process.env.VERCEL) {
+    res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' https://api.mapbox.com; style-src 'self' 'unsafe-inline' https://api.mapbox.com https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self' https://api.mapbox.com https://*.tiles.mapbox.com https://events.mapbox.com; img-src 'self' data: blob: https://api.mapbox.com; worker-src blob:");
+  }
+  next();
+});
+
 app.use(express.static('public'));
 
 // ---------------------------------------------------------------------------
@@ -19,6 +82,8 @@ const cache = {};
 function cached(key, ttlMs, fetchFn) {
   return async (req, res) => {
     const now = Date.now();
+    const ttlSec = Math.round(ttlMs / 1000);
+    res.setHeader('Cache-Control', `public, max-age=${ttlSec}, s-maxage=${ttlSec}`);
     if (cache[key] && now - cache[key].ts < ttlMs) {
       return res.json(cache[key].data);
     }
@@ -118,6 +183,51 @@ const FEED_URLS = {
 };
 
 const ALERTS_URL = 'https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts';
+
+// ---------------------------------------------------------------------------
+// WEATHER (OpenWeatherMap)
+// ---------------------------------------------------------------------------
+let weatherCache = { data: null, ts: 0 };
+const WEATHER_TTL = 10 * 60 * 1000; // 10 minutes
+const NYC_LAT = 40.7128;
+const NYC_LON = -74.0060;
+
+async function fetchWeather() {
+  const now = Date.now();
+  if (weatherCache.data && now - weatherCache.ts < WEATHER_TTL) {
+    return weatherCache.data;
+  }
+
+  const apiKey = process.env.OPENWEATHER_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const url = `https://api.openweathermap.org/data/2.5/weather?lat=${NYC_LAT}&lon=${NYC_LON}&appid=${apiKey}&units=imperial`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const raw = await resp.json();
+
+    const weather = {
+      condition: raw.weather?.[0]?.main || 'Unknown',       // Rain, Snow, Clear, Clouds, etc.
+      description: raw.weather?.[0]?.description || '',      // light rain, heavy snow, etc.
+      temp: Math.round(raw.main?.temp || 0),                 // Fahrenheit
+      feelsLike: Math.round(raw.main?.feels_like || 0),
+      humidity: raw.main?.humidity || 0,
+      windSpeed: Math.round(raw.wind?.speed || 0),           // mph
+      visibility: raw.visibility ? Math.round(raw.visibility / 1609) : null, // miles
+      isRain: ['Rain', 'Drizzle', 'Thunderstorm'].includes(raw.weather?.[0]?.main),
+      isSnow: raw.weather?.[0]?.main === 'Snow',
+      isExtreme: (raw.main?.temp || 70) > 95 || (raw.main?.temp || 70) < 15 || (raw.wind?.speed || 0) > 40
+    };
+
+    weatherCache = { data: weather, ts: now };
+    console.log(`[weather] ${weather.condition} ${weather.temp}°F, wind ${weather.windSpeed}mph`);
+    return weather;
+  } catch (err) {
+    console.error('[weather] fetch failed:', err.message);
+    return weatherCache.data; // Return stale data if available
+  }
+}
 
 const LINE_COLORS = {
   '1': '#EE352E', '2': '#EE352E', '3': '#EE352E',
@@ -321,13 +431,15 @@ function extractTrains(feed) {
 // ---------------------------------------------------------------------------
 // /api/alerts - Service disruptions
 // ---------------------------------------------------------------------------
-app.get('/api/alerts', cached('alerts', 60000, async () => {
+async function computeAlerts() {
   const feed = await fetchFeed(ALERTS_URL);
   const alerts = extractAlerts(feed);
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
   alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
   return { timestamp: Date.now(), alertCount: alerts.length, alerts };
-}));
+}
+
+app.get('/api/alerts', cached('alerts', 60000, computeAlerts));
 
 function extractAlerts(feed) {
   const alerts = [];
@@ -378,6 +490,16 @@ async function computePresence() {
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const hour = now.getHours();
   const dayOfWeek = DAY_NAMES[now.getDay()];
+
+  // Fetch weather for ridership modulation
+  const weather = await fetchWeather();
+  // Rain reduces street-level ridership estimates by 20%, snow by 30%, extreme temps by 15%
+  let weatherModifier = 1.0;
+  if (weather) {
+    if (weather.isSnow) weatherModifier = 0.70;
+    else if (weather.isRain) weatherModifier = 0.80;
+    else if (weather.isExtreme) weatherModifier = 0.85;
+  }
 
   // Get current train activity per station complex for modulation
   let trainsByComplex = {};
@@ -439,8 +561,22 @@ async function computePresence() {
       ridership = Math.round(baseline * Math.min(modulation, 2.0));
     }
 
+    // Apply weather modifier (rain/snow/extreme reduces street presence)
+    ridership = Math.round(ridership * weatherModifier);
+
     const anomalyScore = baseline > 0 ? (ridership - baseline) / baseline : 0;
-    const isAnomaly = Math.abs(anomalyScore) > 0.3;
+    // Z-score anomaly detection: use stddev from model if available, else fall back to 30% threshold
+    const stddevData = station.stddev?.[dayOfWeek];
+    const stddev = stddevData?.[hour] || 0;
+    let isAnomaly;
+    if (stddev > 0 && baseline > 50) {
+      // Statistical anomaly: >2 sigma deviation AND meaningful absolute volume
+      const zScore = (ridership - baseline) / stddev;
+      isAnomaly = Math.abs(zScore) > 2.0;
+    } else {
+      // Fallback for low-traffic stations or missing stddev: use percentage but require minimum volume
+      isAnomaly = Math.abs(anomalyScore) > 0.3 && baseline > 50;
+    }
     if (isAnomaly) anomalyCount++;
 
     // Crime risk for this station at this time window
@@ -483,6 +619,8 @@ async function computePresence() {
     totalPresence,
     anomalyCount,
     isNightMode,
+    weather,
+    trainComplexCount: Object.keys(trainsByComplex).length,
     safetyStats: { avoid: avoidCount, caution: cautionCount, safe: stationList.length - avoidCount - cautionCount },
     stations: stationList
   };
@@ -496,8 +634,21 @@ app.get('/api/presence', cached('presence', 30000, computePresence));
 let intelligenceCache = null;
 let intelligenceCacheTs = 0;
 const INTELLIGENCE_TTL = 5 * 60 * 1000;
+let intelligenceHistory = []; // Rolling buffer of last 3 reports for trend detection
+const MAX_HISTORY = 3;
+let historyLoaded = false;
 
-app.get('/api/intelligence', async (req, res) => {
+// Rate limit: max 20 intelligence requests per IP per 5 minutes (protects API credits)
+const intelLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  message: { error: 'Rate limit exceeded. Try again shortly.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.get('/api/intelligence', intelLimiter, async (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=120');
   const now = Date.now();
   if (intelligenceCache && now - intelligenceCacheTs < INTELLIGENCE_TTL) {
     return res.json(intelligenceCache);
@@ -505,6 +656,13 @@ app.get('/api/intelligence', async (req, res) => {
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.json({ report: null, anomalies: [], generated: now, error: 'No API key configured' });
+  }
+
+  // Load history from Redis on first request (survives cold starts)
+  if (!historyLoaded && redis) {
+    const stored = await loadHistory();
+    if (stored.length > 0) intelligenceHistory = stored;
+    historyLoaded = true;
   }
 
   try {
@@ -530,6 +688,30 @@ app.get('/api/intelligence', async (req, res) => {
     const hour = presenceData.hour;
     const dayOfWeek = presenceData.dayOfWeek;
 
+    // Fetch service alerts (use cache if available, don't fail if unavailable)
+    let alertsData = { alerts: [] };
+    try {
+      if (cache['alerts'] && Date.now() - cache['alerts'].ts < 120000) {
+        alertsData = cache['alerts'].data;
+      } else {
+        alertsData = await computeAlerts();
+        cache['alerts'] = { data: alertsData, ts: Date.now() };
+      }
+    } catch (alertErr) {
+      console.error('[intelligence] alerts fetch failed:', alertErr.message);
+    }
+
+    // Build alert summary for Claude — critical and high severity only
+    const significantAlerts = alertsData.alerts.filter(a =>
+      a.severity === 'critical' || a.severity === 'high'
+    ).slice(0, 10);
+
+    const alertSummary = significantAlerts.length > 0
+      ? significantAlerts.map(a =>
+          `[${a.severity.toUpperCase()}] ${a.effect} on ${a.affectedRoutes.join(',')} — ${a.header.slice(0, 120)}`
+        ).join('\n')
+      : 'No critical service disruptions.';
+
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
     const stationSummary = topStations.map(s =>
@@ -551,31 +733,63 @@ app.get('/api/intelligence', async (req, res) => {
 
     const isNight = hour >= 22 || hour < 6;
 
+    // Build temporal context from previous reports
+    const historySummary = intelligenceHistory.length > 0
+      ? intelligenceHistory.map(h => {
+          const age = Math.round((now - h.ts) / 60000);
+          return `[${age}min ago | presence: ${h.totalPresence.toLocaleString()} | anomalies: ${h.anomalyCount}] ${h.report.slice(0, 150)}...`;
+        }).join('\n')
+      : 'No previous reports (first analysis of this session).';
+
+    // Compute data confidence level
+    const hasTrainData = (presenceData.trainComplexCount || 0) > 0;
+    const hasWeather = !!presenceData.weather;
+    const hasHistory = intelligenceHistory.length > 0;
+    const confidence = hasTrainData ? 'HIGH' : 'MODERATE';
+    const dataSources = [
+      'ridership model',
+      hasTrainData ? 'live GTFS-RT' : null,
+      hasWeather ? 'weather' : null,
+      'crime model',
+      significantAlerts.length > 0 ? 'service alerts' : null,
+      hasHistory ? `${intelligenceHistory.length} prior reports` : null
+    ].filter(Boolean).join(', ');
+
     const message = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 400,
-      system: `You are an urban intelligence analyst monitoring NYC subway crowd flow and street safety in real time. Write a situation report (4-6 lines). Use short declarative sentences. No greetings, no hedging. No em dashes.
+      max_tokens: 500,
+      system: `You are an urban intelligence analyst monitoring NYC subway crowd flow and street safety in real time. Write a structured situation report. Use short declarative sentences. No greetings, no hedging. No em dashes. No markdown bold/headers.
 
 Your audience includes newcomers to NYC who rely on this for personal safety decisions.
 
-Report structure:
-1. Overall system state (crowd levels, trend direction)
-2. Notable anomalies and likely causes
-3. Safety advisory: flag stations/corridors with low presence and elevated crime risk
-${isNight ? '4. NIGHT MODE: emphasize which areas to avoid and which corridors remain well-populated' : ''}
+You have access to previous reports. Use them to identify TRENDS: is crowd presence growing or shrinking? Are anomalies persisting or resolving? Reference changes when notable.
 
-Use compass directions and neighborhood names. Be specific about which stations are safe vs which to avoid at this hour.`,
+OUTPUT FORMAT (use these exact section labels on their own lines):
+SITUATION: 2-3 sentences. System state, crowd levels, trend direction vs previous reports, weather impact if applicable.
+ASSESSMENT: 2-3 sentences. Anomaly analysis, service disruption impact, threat assessment. What is causing current patterns and what do they mean for safety.
+RECOMMENDATION: 2-3 sentences. Specific actionable guidance. Which corridors/stations are safe, which to avoid. Use compass directions and neighborhood names.${isNight ? '\nNIGHT ADVISORY: Which areas to avoid and which corridors remain well-populated.' : ''}
+
+End with: [${confidence} CONFIDENCE — ${dataSources}]`,
       messages: [{
         role: 'user',
         content: `Current time: ${dayOfWeek} ${String(hour).padStart(2, '0')}:00
 ${isNight ? '*** NIGHT MODE ACTIVE ***' : ''}
 Total estimated street presence: ${totalPresence.toLocaleString()}
 
+Weather: ${presenceData.weather ? `${presenceData.weather.condition} (${presenceData.weather.description}), ${presenceData.weather.temp}°F feels like ${presenceData.weather.feelsLike}°F, wind ${presenceData.weather.windSpeed}mph${presenceData.weather.isRain ? ' [RAIN: presence estimates reduced 20%]' : ''}${presenceData.weather.isSnow ? ' [SNOW: presence estimates reduced 30%]' : ''}${presenceData.weather.isExtreme ? ' [EXTREME CONDITIONS]' : ''}` : 'Weather data unavailable'}
+
+Previous reports:
+${historySummary}
+
 Top 10 busiest stations:
 ${stationSummary}
 
 Anomalies:
 ${anomalySummary}
+
+Active service disruptions (${significantAlerts.length} critical/high):
+${alertSummary}
+Total alerts across system: ${alertsData.alerts.length}
 
 Stations flagged AVOID (low presence + elevated crime risk):
 ${safetySummary}
@@ -587,6 +801,16 @@ Write the situation report.`
     });
 
     const report = message.content[0].text;
+
+    // Push to history buffer for temporal trend detection
+    intelligenceHistory.push({
+      ts: now,
+      report,
+      totalPresence,
+      anomalyCount: anomalies.length
+    });
+    if (intelligenceHistory.length > MAX_HISTORY) intelligenceHistory.shift();
+    persistHistory(intelligenceHistory); // async, fire-and-forget
 
     intelligenceCache = {
       report,
@@ -608,8 +832,7 @@ Write the situation report.`
       report: null,
       anomalies: [],
       generated: now,
-      error: 'Analysis temporarily unavailable',
-      debug: process.env.VERCEL ? err.message : undefined
+      error: 'Analysis temporarily unavailable'
     });
   }
 });
@@ -627,6 +850,7 @@ app.get('/api/colors', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=300');
   res.json({ mapboxToken: process.env.MAPBOX_TOKEN || '' });
 });
 
@@ -635,21 +859,24 @@ app.get('/health', (req, res) => {
 });
 
 // Diagnostic: check what's happening with the intelligence pipeline
+// Debug endpoint: local dev only (blocked in production)
 app.get('/api/debug', (req, res) => {
+  if (process.env.VERCEL) {
+    return res.status(404).json({ error: 'Not found' });
+  }
   const hasKey = !!process.env.ANTHROPIC_API_KEY;
-  const keyPrefix = hasKey ? process.env.ANTHROPIC_API_KEY.substring(0, 12) + '...' : 'MISSING';
   const hasModel = !!ridershipModel && Object.keys(ridershipModel.stations || {}).length > 0;
   const hasCrime = !!crimeModel && Object.keys(crimeModel.stationRisk || {}).length > 0;
   const hasPresenceCache = !!cache['presence'];
   const hasIntelCache = !!intelligenceCache;
   res.json({
-    anthropicKey: keyPrefix,
+    anthropicKey: hasKey ? 'SET' : 'MISSING',
     ridershipModel: hasModel ? Object.keys(ridershipModel.stations).length + ' stations' : 'NOT LOADED',
     crimeModel: hasCrime ? Object.keys(crimeModel.stationRisk).length + ' stations' : 'NOT LOADED',
     presenceCached: hasPresenceCache,
     intelligenceCached: hasIntelCache,
     intelligenceCacheAge: hasIntelCache ? Math.round((Date.now() - intelligenceCacheTs) / 1000) + 's' : null,
-    env: process.env.VERCEL ? 'vercel' : 'local',
+    redis: !!redis,
     nodeVersion: process.version
   });
 });

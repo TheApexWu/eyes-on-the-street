@@ -49,9 +49,11 @@ async function fetchAllData() {
 }
 
 function aggregate(rows) {
-  // station_complex_id -> { name, lat, lon, hourly: { Mon: [24 hours], ... } }
+  // station_complex_id -> { name, lat, lon, hourly: { Mon: [24 hours], ... }, stddev: { Mon: [24], ... } }
   const stations = {};
-  const counts = {}; // station_complex_id -> { Mon: [24 counts], ... } for averaging
+  const counts = {};    // station_complex_id -> { Mon: [24 counts], ... }
+  const sumSq = {};     // station_complex_id -> { Mon: [24 sum-of-squares], ... }
+  const rawSums = {};   // station_complex_id -> { Mon: [24 raw sums], ... }
 
   for (const row of rows) {
     const id = row.station_complex_id;
@@ -71,26 +73,37 @@ function aggregate(rows) {
         name: row.station_complex || `Station ${id}`,
         lat,
         lon,
-        hourly: {}
+        hourly: {},
+        stddev: {}
       };
       counts[id] = {};
+      sumSq[id] = {};
+      rawSums[id] = {};
       for (const d of DAY_NAMES) {
         stations[id].hourly[d] = new Array(24).fill(0);
+        stations[id].stddev[d] = new Array(24).fill(0);
         counts[id][d] = new Array(24).fill(0);
+        sumSq[id][d] = new Array(24).fill(0);
+        rawSums[id][d] = new Array(24).fill(0);
       }
     }
 
-    stations[id].hourly[dayName][hour] += ridership;
+    rawSums[id][dayName][hour] += ridership;
+    sumSq[id][dayName][hour] += ridership * ridership;
     counts[id][dayName][hour] += 1;
   }
 
-  // Average by number of weeks observed
+  // Compute mean and standard deviation
   for (const id in stations) {
     for (const day of DAY_NAMES) {
       for (let h = 0; h < 24; h++) {
         const c = counts[id][day][h];
         if (c > 0) {
-          stations[id].hourly[day][h] = Math.round(stations[id].hourly[day][h] / c);
+          const mean = rawSums[id][day][h] / c;
+          stations[id].hourly[day][h] = Math.round(mean);
+          // Variance = E[X^2] - (E[X])^2
+          const variance = (sumSq[id][day][h] / c) - (mean * mean);
+          stations[id].stddev[day][h] = Math.round(Math.sqrt(Math.max(0, variance)));
         }
       }
     }

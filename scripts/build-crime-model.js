@@ -70,7 +70,7 @@ async function fetchCrimes() {
       '$where': `cmplnt_fr_dt >= '${sinceStr}' AND ofns_desc in (${typeFilter}) AND latitude IS NOT NULL`,
       '$limit': String(PAGE_SIZE),
       '$offset': String(offset),
-      '$select': 'cmplnt_fr_tm,ofns_desc,latitude,longitude'
+      '$select': 'cmplnt_fr_dt,cmplnt_fr_tm,ofns_desc,latitude,longitude'
     });
 
     const url = `${CRIME_URL}?${params}`;
@@ -90,6 +90,24 @@ async function fetchCrimes() {
   return allRows;
 }
 
+// Recency decay: crimes from yesterday weight 1.0, crimes from 6 months ago weight ~0.18
+function recencyWeight(crimeDateStr) {
+  if (!crimeDateStr) return 0.5;
+  const crimeDate = new Date(crimeDateStr);
+  const now = new Date();
+  const daysAgo = (now - crimeDate) / (1000 * 60 * 60 * 24);
+  // Exponential decay with half-life of 30 days
+  return Math.exp(-0.693 * daysAgo / 30);
+}
+
+// Absolute risk tiers (based on recency-weighted incident count per 6 months)
+function absoluteRiskTier(weightedCount) {
+  if (weightedCount >= 8) return 'critical';    // ~1.3+ incidents/month weighted
+  if (weightedCount >= 4) return 'elevated';     // ~0.7+ incidents/month weighted
+  if (weightedCount >= 1.5) return 'moderate';   // Some recent activity
+  return 'low';
+}
+
 function computeStationRisk(stations, crimes) {
   // For efficiency: pre-filter using bounding box (~0.004 degrees ~ 400m at NYC latitude)
   const BOX = 0.004;
@@ -104,6 +122,7 @@ function computeStationRisk(stations, crimes) {
       evening: 0,
       latenight: 0,
       total: 0,
+      totalWeighted: 0,
       topCrimeType: null,
       crimeTypes: {}
     };
@@ -120,6 +139,8 @@ function computeStationRisk(stations, crimes) {
     const window = getTimeWindow(crime.cmplnt_fr_tm);
     if (!window) continue;
 
+    const weight = recencyWeight(crime.cmplnt_fr_dt);
+
     // Find all stations within radius
     for (const [id, station] of stationEntries) {
       // Quick bounding box check first
@@ -128,19 +149,20 @@ function computeStationRisk(stations, crimes) {
       // Precise distance check
       const dist = haversineMeters(station.lat, station.lon, cLat, cLon);
       if (dist <= RADIUS_METERS) {
-        stationRisk[id][window]++;
+        stationRisk[id][window] += weight;
         stationRisk[id].total++;
+        stationRisk[id].totalWeighted += weight;
         matched++;
 
         const type = crime.ofns_desc || 'OTHER';
-        stationRisk[id].crimeTypes[type] = (stationRisk[id].crimeTypes[type] || 0) + 1;
+        stationRisk[id].crimeTypes[type] = (stationRisk[id].crimeTypes[type] || 0) + weight;
       }
     }
   }
 
   console.log(`  ${matched} crime-station matches`);
 
-  // Determine top crime type per station
+  // Determine top crime type per station (by recency-weighted count)
   for (const id in stationRisk) {
     const types = stationRisk[id].crimeTypes;
     let maxType = null;
@@ -149,6 +171,8 @@ function computeStationRisk(stations, crimes) {
       if (count > maxCount) { maxCount = count; maxType = type; }
     }
     stationRisk[id].topCrimeType = maxType;
+    // Assign absolute risk tier based on recency-weighted total
+    stationRisk[id].riskTier = absoluteRiskTier(stationRisk[id].totalWeighted);
     delete stationRisk[id].crimeTypes; // don't ship raw types to client
   }
 
@@ -165,7 +189,7 @@ function computeStationRisk(stations, crimes) {
     }
   }
 
-  // Compute overall risk (weighted: late night counts more)
+  // Compute overall risk (weighted: late night counts more, using recency-weighted values)
   let maxTotal = 0;
   for (const id in stationRisk) {
     const s = stationRisk[id];
