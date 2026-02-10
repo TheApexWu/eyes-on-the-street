@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "build-model": "node scripts/build-model.js"
+    "build-model": "node scripts/build-model.js",
+    "build-crime": "node scripts/build-crime-model.js",
+    "build-all": "node scripts/build-model.js && node scripts/build-crime-model.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

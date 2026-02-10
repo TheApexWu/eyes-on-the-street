@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EYES ON THE STREET - Icon Catalog</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      padding: 40px;
+    }
+    h1 { font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; color: #00ff88; margin-bottom: 8px; }
+    .subtitle { font-size: 11px; color: #666; margin-bottom: 40px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 24px;
+    }
+    .card {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px;
+      padding: 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .card:hover {
+      border-color: #00ff88;
+      background: rgba(0,255,136,0.03);
+    }
+    .card svg { margin-bottom: 12px; }
+    .card-name { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #999; margin-bottom: 4px; }
+    .card-desc { font-size: 9px; color: #555; }
+    .section-label {
+      font-size: 11px;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #ff8800;
+      margin: 40px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .variant-row {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      margin: 16px 0;
+      flex-wrap: wrap;
+    }
+    .variant-row .card { flex: 0 0 140px; padding: 16px; }
+    .color-note { font-size: 9px; color: #555; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Eyes on the Street - Icon Catalog</h1>
+  <p class="subtitle">Pick your favicon / logo mark. Two-color SVGs. Palantir surveillance aesthetic.</p>
+
+  <div class="section-label">All-Seeing Eyes</div>
+  <div class="grid">
+
+    <!-- 1. Classic Eye of Providence -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M32 16C18 16 8 32 8 32s10 16 24 16 24-16 24-16S46 16 32 16z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="8" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="3" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Providence</div>
+      <div class="card-desc">Classic all-seeing eye. Clean, readable at small sizes.</div>
+    </div>
+
+    <!-- 2. Slit Eye (reptilian/panopticon) -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 18 32 18s24 14 24 14-10 14-24 14S8 32 8 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <ellipse cx="32" cy="32" rx="3" ry="10" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Slit</div>
+      <div class="card-desc">Vertical pupil. Reptilian. Panopticon energy.</div>
+    </div>
+
+    <!-- 3. Concentric Rings Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 20 32 20s24 12 24 12-10 12-24 12S8 32 8 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="9" stroke="#00ff88" stroke-width="1.5" fill="none"/>
+        <circle cx="32" cy="32" r="5" stroke="#00ff88" stroke-width="1.5" fill="none"/>
+        <circle cx="32" cy="32" r="2" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Rings</div>
+      <div class="card-desc">Concentric circles. Radar / sonar feel.</div>
+    </div>
+
+    <!-- 4. Triangle Eye (Illuminati) -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="32,8 56,52 8,52" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <path d="M20 38C20 38 25 30 32 30s12 8 12 8-5 6-12 6-12-6-12-6z" stroke="#00ff88" stroke-width="1.5" fill="none"/>
+        <circle cx="32" cy="35" r="3" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Pyramid</div>
+      <div class="card-desc">Eye in triangle. Classic conspiracy. Maybe too on the nose.</div>
+    </div>
+
+    <!-- 5. Crosshair Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 20 32 20s24 12 24 12-10 12-24 12S8 32 8 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="7" stroke="#00ff88" stroke-width="1.5" fill="none"/>
+        <line x1="32" y1="22" x2="32" y2="27" stroke="#00ff88" stroke-width="1.5"/>
+        <line x1="32" y1="37" x2="32" y2="42" stroke="#00ff88" stroke-width="1.5"/>
+        <line x1="22" y1="32" x2="27" y2="32" stroke="#00ff88" stroke-width="1.5"/>
+        <line x1="37" y1="32" x2="42" y2="32" stroke="#00ff88" stroke-width="1.5"/>
+        <circle cx="32" cy="32" r="2" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Crosshair</div>
+      <div class="card-desc">Targeting reticle inside eye. Military intelligence.</div>
+    </div>
+
+    <!-- 6. Glitch Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 20 32 20s24 12 24 12" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <path d="M8 32C8 32 18 44 32 44s24-12 24-12" stroke="#00ff88" stroke-width="2" fill="none" stroke-dasharray="4 3"/>
+        <circle cx="32" cy="32" r="6" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <rect x="30" y="29" width="4" height="6" fill="#00ff88"/>
+        <line x1="6" y1="28" x2="58" y2="28" stroke="#00ff88" stroke-width="0.5" opacity="0.3"/>
+        <line x1="6" y1="36" x2="58" y2="36" stroke="#00ff88" stroke-width="0.5" opacity="0.3"/>
+      </svg>
+      <div class="card-name">Glitch</div>
+      <div class="card-desc">Corrupted scan lines. Digital surveillance gone wrong.</div>
+    </div>
+
+    <!-- 7. Broadcast Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 32C12 32 20 22 32 22s20 10 20 10-8 10-20 10S12 32 12 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="4" fill="#00ff88"/>
+        <path d="M22 18a18 18 0 0 0 0 28" stroke="#00ff88" stroke-width="1.5" fill="none" opacity="0.5"/>
+        <path d="M42 18a18 18 0 0 1 0 28" stroke="#00ff88" stroke-width="1.5" fill="none" opacity="0.5"/>
+        <path d="M17 14a24 24 0 0 0 0 36" stroke="#00ff88" stroke-width="1" fill="none" opacity="0.3"/>
+        <path d="M47 14a24 24 0 0 1 0 36" stroke="#00ff88" stroke-width="1" fill="none" opacity="0.3"/>
+      </svg>
+      <div class="card-name">Broadcast</div>
+      <div class="card-desc">Eye emitting signal waves. Active surveillance.</div>
+    </div>
+
+    <!-- 8. Lidless Eye (Sauron minimal) -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="32" cy="32" rx="22" ry="12" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <ellipse cx="32" cy="32" rx="22" ry="12" stroke="#00ff88" stroke-width="0.5" fill="none" transform="rotate(90 32 32)"/>
+        <circle cx="32" cy="32" r="4" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Lidless</div>
+      <div class="card-desc">Rotated double ellipse. Sauron meets compass rose.</div>
+    </div>
+
+    <!-- 9. Grid Eye (data surveillance) -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 20 32 20s24 12 24 12-10 12-24 12S8 32 8 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="8" stroke="#00ff88" stroke-width="1.5" fill="none"/>
+        <line x1="24" y1="32" x2="40" y2="32" stroke="#00ff88" stroke-width="0.8"/>
+        <line x1="32" y1="24" x2="32" y2="40" stroke="#00ff88" stroke-width="0.8"/>
+        <line x1="26" y1="26" x2="38" y2="38" stroke="#00ff88" stroke-width="0.5" opacity="0.5"/>
+        <line x1="38" y1="26" x2="26" y2="38" stroke="#00ff88" stroke-width="0.5" opacity="0.5"/>
+        <circle cx="32" cy="32" r="2" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Grid</div>
+      <div class="card-desc">Analytical grid inside iris. Data processing aesthetic.</div>
+    </div>
+
+    <!-- 10. Minimal Dot Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#00ff88" stroke-width="2.5" fill="none"/>
+        <circle cx="32" cy="32" r="4" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Minimal</div>
+      <div class="card-desc">Just the eye shape and pupil. Cleanest at favicon size.</div>
+    </div>
+
+    <!-- 11. Half Eye (peeking) -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 36C8 36 18 24 32 24s24 12 24 12" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <line x1="8" y1="36" x2="56" y2="36" stroke="#00ff88" stroke-width="2"/>
+        <circle cx="32" cy="33" r="5" fill="#00ff88"/>
+        <circle cx="34" cy="31" r="1.5" fill="#0a0a0f"/>
+      </svg>
+      <div class="card-name">Peeker</div>
+      <div class="card-desc">Half-open. Watching from below. Unsettling.</div>
+    </div>
+
+    <!-- 12. Scanner Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 20 32 20s24 12 24 12-10 12-24 12S8 32 8 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="7" stroke="#00ff88" stroke-width="1" fill="none"/>
+        <line x1="32" y1="20" x2="32" y2="44" stroke="#00ff88" stroke-width="1" opacity="0.4"/>
+        <line x1="32" y1="32" x2="48" y2="26" stroke="#00ff88" stroke-width="1.5" opacity="0.7"/>
+        <circle cx="32" cy="32" r="2" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Scanner</div>
+      <div class="card-desc">Radar sweep line inside eye. Active scanning.</div>
+    </div>
+
+    <!-- 13. Node Eye (network) -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 20 32 20s24 12 24 12-10 12-24 12S8 32 8 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="4" fill="#00ff88"/>
+        <line x1="32" y1="32" x2="20" y2="26" stroke="#00ff88" stroke-width="1"/>
+        <line x1="32" y1="32" x2="44" y2="26" stroke="#00ff88" stroke-width="1"/>
+        <line x1="32" y1="32" x2="20" y2="38" stroke="#00ff88" stroke-width="1"/>
+        <line x1="32" y1="32" x2="44" y2="38" stroke="#00ff88" stroke-width="1"/>
+        <circle cx="20" cy="26" r="2" fill="#00ff88" opacity="0.5"/>
+        <circle cx="44" cy="26" r="2" fill="#00ff88" opacity="0.5"/>
+        <circle cx="20" cy="38" r="2" fill="#00ff88" opacity="0.5"/>
+        <circle cx="44" cy="38" r="2" fill="#00ff88" opacity="0.5"/>
+      </svg>
+      <div class="card-name">Network</div>
+      <div class="card-desc">Eye as central node. Connected intelligence.</div>
+    </div>
+
+    <!-- 14. Hex Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <polygon points="32,12 52,22 52,42 32,52 12,42 12,22" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <path d="M16 32C16 32 22 24 32 24s16 8 16 8-6 8-16 8-16-8-16-8z" stroke="#00ff88" stroke-width="1.5" fill="none"/>
+        <circle cx="32" cy="32" r="4" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Hex</div>
+      <div class="card-desc">Eye in hexagon. Hive mind. Institutional.</div>
+    </div>
+
+    <!-- 15. Broken Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M8 32C8 32 18 20 28 20" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <path d="M36 20C46 20 56 32 56 32" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <path d="M8 32C8 32 18 44 28 44" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <path d="M36 44C46 44 56 32 56 32" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="6" stroke="#00ff88" stroke-width="2" fill="none" stroke-dasharray="3 2"/>
+        <circle cx="32" cy="32" r="2.5" fill="#00ff88"/>
+      </svg>
+      <div class="card-name">Broken</div>
+      <div class="card-desc">Fragmented. System under strain. Incomplete data.</div>
+    </div>
+
+    <!-- 16. Double Eye -->
+    <div class="card">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 32C4 32 14 22 28 22s24 10 24 10" stroke="#00ff88" stroke-width="1.5" fill="none" opacity="0.4"/>
+        <path d="M4 32C4 32 14 42 28 42s24-10 24-10" stroke="#00ff88" stroke-width="1.5" fill="none" opacity="0.4"/>
+        <path d="M10 32C10 32 18 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#00ff88" stroke-width="2" fill="none"/>
+        <circle cx="32" cy="32" r="5" fill="#00ff88"/>
+        <circle cx="33" cy="31" r="2" fill="#0a0a0f"/>
+      </svg>
+      <div class="card-name">Double</div>
+      <div class="card-desc">Outer ghost eye. Layered perception. Depth.</div>
+    </div>
+
+  </div>
+
+  <div class="section-label">Color Variants (pick a base, I'll generate all sizes)</div>
+  <div class="variant-row">
+    <div class="card">
+      <svg width="48" height="48" viewBox="0 0 64 64" fill="none"><path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#00ff88" stroke-width="2.5" fill="none"/><circle cx="32" cy="32" r="4" fill="#00ff88"/></svg>
+      <div class="card-name">Green</div>
+      <div class="color-note">#00ff88 on dark</div>
+    </div>
+    <div class="card">
+      <svg width="48" height="48" viewBox="0 0 64 64" fill="none"><path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#ff8800" stroke-width="2.5" fill="none"/><circle cx="32" cy="32" r="4" fill="#ff8800"/></svg>
+      <div class="card-name">Amber</div>
+      <div class="color-note">#ff8800 on dark</div>
+    </div>
+    <div class="card">
+      <svg width="48" height="48" viewBox="0 0 64 64" fill="none"><path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#ff2244" stroke-width="2.5" fill="none"/><circle cx="32" cy="32" r="4" fill="#ff2244"/></svg>
+      <div class="card-name">Red</div>
+      <div class="color-note">#ff2244 on dark</div>
+    </div>
+    <div class="card">
+      <svg width="48" height="48" viewBox="0 0 64 64" fill="none"><path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#ffffff" stroke-width="2.5" fill="none"/><circle cx="32" cy="32" r="4" fill="#ffffff"/></svg>
+      <div class="card-name">White</div>
+      <div class="color-note">#ffffff on dark</div>
+    </div>
+  </div>
+
+  <div class="section-label">Favicon Preview (16x16, 32x32)</div>
+  <div class="variant-row">
+    <div class="card" style="background:#000">
+      <svg width="16" height="16" viewBox="0 0 64 64" fill="none"><path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#00ff88" stroke-width="4" fill="none"/><circle cx="32" cy="32" r="5" fill="#00ff88"/></svg>
+      <div class="card-name">16px</div>
+    </div>
+    <div class="card" style="background:#000">
+      <svg width="32" height="32" viewBox="0 0 64 64" fill="none"><path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#00ff88" stroke-width="3" fill="none"/><circle cx="32" cy="32" r="4" fill="#00ff88"/></svg>
+      <div class="card-name">32px</div>
+    </div>
+    <div class="card" style="background:#000">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M10 32C10 32 20 22 32 22s22 10 22 10-10 10-22 10S10 32 10 32z" stroke="#00ff88" stroke-width="2.5" fill="none"/><circle cx="32" cy="32" r="4" fill="#00ff88"/></svg>
+      <div class="card-name">64px</div>
+    </div>
+  </div>
+
+</body>
+</html>

@@ -1,25 +1,52 @@
-// EYES ON THE STREET v2 - Main Application
-// Orchestrates particle simulation, station rings, intelligence panel, HUD
+// EYES ON THE STREET v2 - Mapbox GL
+// 3D extruded buildings, pitched camera, WebGL heatmap, Claude intelligence
 
-(() => {
+(async () => {
+  const $ = id => document.getElementById(id);
+
+  // ---------------------------------------------------------------------------
+  // FETCH MAPBOX TOKEN
+  // ---------------------------------------------------------------------------
+  let mapboxToken = '';
+  try {
+    const configResp = await fetch('/api/config');
+    const config = await configResp.json();
+    mapboxToken = config.mapboxToken;
+  } catch (e) {}
+
+  if (!mapboxToken) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="token-warning">
+        No Mapbox token found.<br>
+        Get a free one at mapbox.com and add it to .env:
+        <code>MAPBOX_TOKEN=pk.your_token_here</code>
+      </div>
+    `);
+    return;
+  }
+
   // ---------------------------------------------------------------------------
   // MAP INIT
   // ---------------------------------------------------------------------------
-  const map = L.map('map', {
-    zoomControl: true,
-    attributionControl: true
-  }).setView([40.7580, -73.9855], 12);
+  mapboxgl.accessToken = mapboxToken;
 
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; OpenStreetMap &copy; CARTO',
-    maxZoom: 19
-  }).addTo(map);
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/dark-v11',
+    center: [-73.9855, 40.7580],    // Mapbox uses [lng, lat]
+    zoom: 12,
+    pitch: 50,                       // tilt camera 50 degrees
+    bearing: -17.5,                  // rotate to align with Manhattan grid
+    antialias: true,
+    minZoom: 9,
+    maxZoom: 18
+  });
+
+  map.addControl(new mapboxgl.NavigationControl(), 'top-left');
 
   // ---------------------------------------------------------------------------
   // HELPERS
   // ---------------------------------------------------------------------------
-  const $ = id => document.getElementById(id);
-
   function escapeHtml(text) {
     const d = document.createElement('div');
     d.textContent = text;
@@ -32,16 +59,6 @@
     return String(n);
   }
 
-  // ---------------------------------------------------------------------------
-  // STATUS + CLOCK
-  // ---------------------------------------------------------------------------
-  function setStatus(state, text) {
-    const dot = $('statusDot');
-    dot.className = 'hud-dot' + (state === 'error' ? ' error' : state === 'loading' ? ' loading' : '');
-    $('statusText').textContent = text;
-  }
-
-  // City rhythm phases - what's happening in the city right now
   function getCityPhase(hour) {
     if (hour >= 0 && hour < 5)   return 'Dead Hours';
     if (hour >= 5 && hour < 7)   return 'Early Risers';
@@ -55,6 +72,15 @@
     return 'Late Night';
   }
 
+  // ---------------------------------------------------------------------------
+  // STATUS + CLOCK
+  // ---------------------------------------------------------------------------
+  function setStatus(state, text) {
+    const dot = $('statusDot');
+    dot.className = 'hud-dot' + (state === 'error' ? ' error' : state === 'loading' ? ' loading' : '');
+    $('statusText').textContent = text;
+  }
+
   function updateClock() {
     const now = new Date();
     const h = String(now.getHours()).padStart(2, '0');
@@ -65,7 +91,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // LINE COLORS (for alert badges)
+  // LINE COLORS
   // ---------------------------------------------------------------------------
   const LINE_COLORS = {
     '1': '#EE352E', '2': '#EE352E', '3': '#EE352E',
@@ -82,22 +108,184 @@
   };
 
   // ---------------------------------------------------------------------------
+  // WAIT FOR MAP LOAD
+  // ---------------------------------------------------------------------------
+  await new Promise(resolve => map.on('load', resolve));
+
+  // Strip labels for cleaner look
+  const style = map.getStyle();
+  for (const layer of style.layers) {
+    if (layer.type === 'symbol' && layer['source-layer'] !== 'water_label') {
+      map.setLayoutProperty(layer.id, 'visibility', 'none');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3D BUILDINGS
+  // ---------------------------------------------------------------------------
+  map.addLayer({
+    id: '3d-buildings',
+    source: 'composite',
+    'source-layer': 'building',
+    filter: ['==', 'extrude', 'true'],
+    type: 'fill-extrusion',
+    minzoom: 12,
+    paint: {
+      'fill-extrusion-color': '#12121a',
+      'fill-extrusion-height': ['get', 'height'],
+      'fill-extrusion-base': ['get', 'min_height'],
+      'fill-extrusion-opacity': 0.5
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // HEATMAP + STATION SOURCES
+  // ---------------------------------------------------------------------------
+  const emptyGeoJSON = { type: 'FeatureCollection', features: [] };
+
+  map.addSource('presence', { type: 'geojson', data: emptyGeoJSON });
+
+  // Heatmap layer (renders BELOW buildings so glow bleeds through)
+  map.addLayer({
+    id: 'presence-heat',
+    type: 'heatmap',
+    source: 'presence',
+    maxzoom: 17,
+    paint: {
+      'heatmap-weight': ['get', 'weight'],
+      'heatmap-intensity': [
+        'interpolate', ['linear'], ['zoom'],
+        10, 0.8,
+        14, 1.5,
+        17, 2.5
+      ],
+      'heatmap-radius': [
+        'interpolate', ['linear'], ['zoom'],
+        10, 12,
+        12, 22,
+        14, 40,
+        16, 60
+      ],
+      'heatmap-color': [
+        'interpolate', ['linear'], ['heatmap-density'],
+        0,   'rgba(0,0,0,0)',
+        0.05, 'rgba(30,5,0,0.2)',
+        0.15, 'rgba(80,20,0,0.35)',
+        0.3,  'rgba(180,60,10,0.45)',
+        0.5,  'rgba(255,120,40,0.55)',
+        0.7,  'rgba(255,170,80,0.65)',
+        0.9,  'rgba(255,210,140,0.75)',
+        1.0,  'rgba(255,240,200,0.85)'
+      ],
+      'heatmap-opacity': 0.85
+    }
+  }, '3d-buildings'); // insert below buildings
+
+  // Station circles (visible at higher zoom) - colored by safety level
+  map.addLayer({
+    id: 'station-circles',
+    type: 'circle',
+    source: 'presence',
+    minzoom: 12,
+    paint: {
+      'circle-radius': [
+        'interpolate', ['linear'], ['get', 'ridership'],
+        0, 2,
+        500, 3,
+        2000, 5,
+        5000, 7
+      ],
+      'circle-color': [
+        'match', ['get', 'safetyLevel'],
+        'safe', '#00ff88',
+        'caution', '#ff8800',
+        'avoid', '#ff2244',
+        '#ffaa44'
+      ],
+      'circle-opacity': 0.8,
+      'circle-blur': 0.3,
+      'circle-stroke-width': [
+        'match', ['get', 'safetyLevel'],
+        'avoid', 1.5,
+        0.5
+      ],
+      'circle-stroke-color': [
+        'match', ['get', 'safetyLevel'],
+        'avoid', 'rgba(255,34,68,0.6)',
+        'caution', 'rgba(255,136,0,0.3)',
+        'rgba(255,255,255,0.15)'
+      ]
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // PRESENCE DATA
   // ---------------------------------------------------------------------------
   let presenceData = null;
+  let stationLookup = {};
+
+  function presenceToGeoJSON(data) {
+    const maxRidership = data.stations.reduce((max, s) => Math.max(max, s.ridership || 0), 1);
+    return {
+      type: 'FeatureCollection',
+      features: data.stations.map(s => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [s.lon, s.lat]
+        },
+        properties: {
+          id: s.id,
+          name: s.name,
+          ridership: s.ridership || 0,
+          baseline: s.baseline || 0,
+          weight: (s.ridership || 0) / maxRidership,
+          anomalyScore: s.anomalyScore || 0,
+          isAnomaly: s.isAnomaly || false,
+          trainCount: s.trainCount || 0,
+          crimeRisk: s.crimeRisk || 0,
+          crimeTotal: s.crimeTotal || 0,
+          topCrimeType: s.topCrimeType || '',
+          safetyLevel: s.safetyLevel || 'safe'
+        }
+      }))
+    };
+  }
 
   async function fetchPresence() {
     try {
       const resp = await fetch('/api/presence');
       presenceData = await resp.json();
 
-      // Update HUD
       $('presenceCount').textContent = formatNumber(presenceData.totalPresence);
       $('stationCount').textContent = presenceData.stations.length;
       $('anomalyCount').textContent = presenceData.anomalyCount || 0;
 
-      // Feed data to particle engine and station layer
-      ParticleEngine.setStations(presenceData.stations);
+      // Night mode + safety stats
+      const nightBadge = $('nightBadge');
+      const safetyStats = $('safetyStats');
+      if (presenceData.isNightMode) {
+        nightBadge.style.display = '';
+        document.body.classList.add('night-mode');
+      } else {
+        nightBadge.style.display = 'none';
+        document.body.classList.remove('night-mode');
+      }
+      if (presenceData.safetyStats) {
+        const ss = presenceData.safetyStats;
+        safetyStats.innerHTML = `<span class="safety-safe">${ss.safe}</span>/<span class="safety-caution">${ss.caution}</span>/<span class="safety-avoid">${ss.avoid}</span>`;
+      }
+
+      const geojson = presenceToGeoJSON(presenceData);
+      map.getSource('presence').setData(geojson);
+
+      // Build lookup for click interaction
+      stationLookup = {};
+      for (const s of presenceData.stations) {
+        stationLookup[s.id] = s;
+      }
+
+      // Feed stations to pulse ring layer
       StationLayer.setStations(presenceData.stations);
 
       return presenceData;
@@ -108,27 +296,27 @@
   }
 
   // ---------------------------------------------------------------------------
-  // TRAIN DATA (for station pulse detection)
+  // HEATMAP BREATHING (throttled to every 2 seconds, not 60fps)
+  // ---------------------------------------------------------------------------
+  setInterval(() => {
+    const t = performance.now() * 0.001;
+    try {
+      map.setPaintProperty('presence-heat', 'heatmap-opacity', 0.80 + Math.sin(t * 0.12) * 0.05);
+    } catch (e) {}
+  }, 2000);
+
+  // ---------------------------------------------------------------------------
+  // TRAINS (for pulse rings)
   // ---------------------------------------------------------------------------
   async function fetchTrains() {
     try {
       const resp = await fetch('/api/trains');
       const data = await resp.json();
-
-      // Feed to station layer for pulse ring detection
+      // onTrainUpdate handles arrival detection and pulse rings internally
+      // No separate pulse() loop needed (was causing double-pulsing)
       StationLayer.onTrainUpdate(data.trains);
-
-      // Also trigger pulses for stations where trains are arriving
-      for (const train of data.trains) {
-        if (train.status === 'At Station' && train.latitude && train.longitude) {
-          StationLayer.pulse(train.latitude, train.longitude, false);
-        }
-      }
-
-      return data;
     } catch (err) {
       console.error('[trains] error:', err);
-      return null;
     }
   }
 
@@ -156,12 +344,9 @@
 
       if (data.generated) {
         const date = new Date(data.generated);
-        const h = String(date.getHours()).padStart(2, '0');
-        const m = String(date.getMinutes()).padStart(2, '0');
-        timeEl.textContent = `${h}:${m}`;
+        timeEl.textContent = `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
       }
 
-      // Render anomaly list
       if (data.anomalies && data.anomalies.length > 0) {
         anomaliesEl.innerHTML = data.anomalies.slice(0, 5).map(a => {
           const pct = Math.round(a.score * 100);
@@ -185,7 +370,6 @@
   // ALERTS
   // ---------------------------------------------------------------------------
   let alertsVisible = false;
-
   window.toggleAlerts = function() {
     alertsVisible = !alertsVisible;
     $('alertsPanel').classList.toggle('visible', alertsVisible);
@@ -232,86 +416,189 @@
   }
 
   // ---------------------------------------------------------------------------
-  // STATION CLICK INTERACTION
+  // STATION CLICK
   // ---------------------------------------------------------------------------
-  let activePopup = null;
+  map.on('click', 'station-circles', (e) => {
+    if (!e.features || e.features.length === 0) return;
+    const props = e.features[0].properties;
+    const coords = e.features[0].geometry.coordinates;
 
-  map.on('click', (e) => {
-    if (activePopup) {
-      map.closePopup(activePopup);
-      activePopup = null;
-    }
-
-    const station = StationLayer.getStationAt(e.latlng, 25);
-    if (!station) return;
-
-    const anomalyPct = Math.round(station.anomalyScore * 100);
+    const anomalyPct = Math.round(props.anomalyScore * 100);
     const anomalySign = anomalyPct > 0 ? '+' : '';
     let anomalyHtml = '';
-    if (station.isAnomaly) {
+    if (props.isAnomaly) {
       const cls = anomalyPct > 0 ? 'surge' : 'quiet';
       const label = anomalyPct > 0 ? 'SURGE' : 'QUIET';
       anomalyHtml = `<div class="popup-anomaly ${cls}">${label} ${anomalySign}${anomalyPct}% vs baseline</div>`;
     }
 
-    const html = `
-      <div class="popup-station-name">${escapeHtml(station.name)}</div>
-      <div class="popup-row">
-        <span class="popup-label">Current</span>
-        <span class="popup-value">${station.ridership.toLocaleString()} riders/hr</span>
-      </div>
-      <div class="popup-row">
-        <span class="popup-label">Baseline</span>
-        <span class="popup-value">${station.baseline.toLocaleString()} riders/hr</span>
-      </div>
-      <div class="popup-row">
-        <span class="popup-label">Deviation</span>
-        <span class="popup-value">${anomalySign}${anomalyPct}%</span>
-      </div>
-      <div class="popup-row">
-        <span class="popup-label">Trains nearby</span>
-        <span class="popup-value">${station.trainCount || 0}</span>
-      </div>
-      ${anomalyHtml}
-    `;
+    const safetyColors = { safe: 'var(--green)', caution: 'var(--amber)', avoid: 'var(--red)' };
+    const safetyLabels = { safe: 'SAFE', caution: 'CAUTION', avoid: 'AVOID' };
+    const sl = props.safetyLevel || 'safe';
+    const crimeRiskPct = Math.round((props.crimeRisk || 0) * 100);
+    const crimeType = props.topCrimeType ? escapeHtml(props.topCrimeType.toLowerCase()) : 'none reported';
 
-    activePopup = L.popup({
-      closeButton: true,
-      className: 'station-popup'
-    })
-      .setLatLng([station.lat, station.lon])
-      .setContent(html)
-      .openOn(map);
+    new mapboxgl.Popup({ closeButton: true })
+      .setLngLat(coords)
+      .setHTML(`
+        <div class="popup-station-name">${escapeHtml(props.name)}</div>
+        <div class="popup-safety-badge" style="background:${safetyColors[sl]}20;color:${safetyColors[sl]};border:1px solid ${safetyColors[sl]}40;padding:3px 8px;border-radius:3px;font-size:10px;font-weight:600;text-align:center;margin-bottom:6px">${safetyLabels[sl]}</div>
+        <div class="popup-row">
+          <span class="popup-label">Current</span>
+          <span class="popup-value">${props.ridership.toLocaleString()} riders/hr</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-label">Baseline</span>
+          <span class="popup-value">${props.baseline.toLocaleString()} riders/hr</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-label">Deviation</span>
+          <span class="popup-value">${anomalySign}${anomalyPct}%</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-label">Crime Risk</span>
+          <span class="popup-value" style="color:${crimeRiskPct > 50 ? 'var(--red)' : crimeRiskPct > 25 ? 'var(--amber)' : 'var(--green)'}">${crimeRiskPct}%</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-label">Primary Threat</span>
+          <span class="popup-value">${crimeType}</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-label">Incidents (6mo)</span>
+          <span class="popup-value">${props.crimeTotal || 0}</span>
+        </div>
+        <div class="popup-row">
+          <span class="popup-label">Trains nearby</span>
+          <span class="popup-value">${props.trainCount || 0}</span>
+        </div>
+        ${anomalyHtml}
+      `)
+      .addTo(map);
+  });
+
+  map.on('mouseenter', 'station-circles', () => { map.getCanvas().style.cursor = 'pointer'; });
+  map.on('mouseleave', 'station-circles', () => { map.getCanvas().style.cursor = ''; });
+
+  // ---------------------------------------------------------------------------
+  // ROTATION CONTROLS
+  // ---------------------------------------------------------------------------
+  let rotateInterval = null;
+
+  function startRotate(direction) {
+    if (rotateInterval) return;
+    rotateInterval = setInterval(() => {
+      map.easeTo({ bearing: map.getBearing() + direction * 10, duration: 200 });
+    }, 200);
+  }
+
+  function stopRotate() {
+    if (rotateInterval) {
+      clearInterval(rotateInterval);
+      rotateInterval = null;
+    }
+  }
+
+  $('rotateCCW').addEventListener('mousedown', () => startRotate(-1));
+  $('rotateCCW').addEventListener('touchstart', (e) => { e.preventDefault(); startRotate(-1); });
+  $('rotateCW').addEventListener('mousedown', () => startRotate(1));
+  $('rotateCW').addEventListener('touchstart', (e) => { e.preventDefault(); startRotate(1); });
+  window.addEventListener('mouseup', stopRotate);
+  window.addEventListener('touchend', stopRotate);
+
+  // ---------------------------------------------------------------------------
+  // STATION SEARCH
+  // ---------------------------------------------------------------------------
+  const searchInput = $('stationSearch');
+  const searchResults = $('stationResults');
+
+  searchInput.addEventListener('input', () => {
+    const query = searchInput.value.trim().toLowerCase();
+    if (!query || !presenceData) {
+      searchResults.classList.remove('visible');
+      return;
+    }
+
+    const matches = presenceData.stations
+      .filter(s => s.name.toLowerCase().includes(query))
+      .sort((a, b) => (b.ridership || 0) - (a.ridership || 0))
+      .slice(0, 10);
+
+    if (matches.length === 0) {
+      searchResults.innerHTML = '<div class="station-result-item" style="color:var(--text-dim)">No matches</div>';
+      searchResults.classList.add('visible');
+      return;
+    }
+
+    searchResults.innerHTML = matches.map(s => {
+      const anomalyTag = s.isAnomaly
+        ? `<span class="station-result-anomaly ${s.anomalyScore > 0 ? 'surge' : 'quiet'}">${s.anomalyScore > 0 ? 'SURGE' : 'QUIET'}</span>`
+        : '';
+      return `<div class="station-result-item" data-lon="${s.lon}" data-lat="${s.lat}" data-name="${escapeHtml(s.name)}">
+        <span class="station-result-name">${escapeHtml(s.name)}</span>
+        <span class="station-result-riders">${formatNumber(s.ridership || 0)}/hr</span>
+        ${anomalyTag}
+      </div>`;
+    }).join('');
+
+    searchResults.classList.add('visible');
+  });
+
+  searchResults.addEventListener('click', (e) => {
+    const item = e.target.closest('.station-result-item');
+    if (!item || !item.dataset.lon) return;
+
+    const lon = parseFloat(item.dataset.lon);
+    const lat = parseFloat(item.dataset.lat);
+
+    map.flyTo({
+      center: [lon, lat],
+      zoom: 15,
+      pitch: 55,
+      duration: 1500
+    });
+
+    searchInput.value = item.dataset.name;
+    searchResults.classList.remove('visible');
+  });
+
+  // Close search results when clicking elsewhere
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.station-search')) {
+      searchResults.classList.remove('visible');
+    }
+  });
+
+  // Escape key clears search
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      searchInput.value = '';
+      searchResults.classList.remove('visible');
+      searchInput.blur();
+    }
   });
 
   // ---------------------------------------------------------------------------
   // BOOT
   // ---------------------------------------------------------------------------
-  async function boot() {
-    setStatus('loading', 'LOADING');
-    updateClock();
-    setInterval(updateClock, 1000);
+  setStatus('loading', 'LOADING');
+  updateClock();
+  setInterval(updateClock, 1000);
 
-    // Init canvas engines
-    ParticleEngine.init(map);
-    StationLayer.init(map);
+  StationLayer.init(map);
 
-    // Initial data load
-    setStatus('loading', 'FETCHING');
-    await fetchPresence();
-    setStatus('live', 'LIVE');
+  setStatus('loading', 'FETCHING');
+  await fetchPresence();
+  setStatus('live', 'LIVE');
 
-    // Stagger other fetches
-    fetchTrains();
-    fetchAlerts();
-    fetchIntelligence();
+  fetchTrains();
+  fetchAlerts();
+  fetchIntelligence();
 
-    // Refresh intervals
-    setInterval(fetchPresence, 30000);       // Presence: 30s
-    setInterval(fetchTrains, 30000);         // Trains: 30s (for pulse detection)
-    setInterval(fetchAlerts, 60000);         // Alerts: 1min
-    setInterval(fetchIntelligence, 300000);  // Intelligence: 5min
-  }
+  setInterval(fetchPresence, 30000);
+  setInterval(fetchTrains, 30000);
+  setInterval(fetchAlerts, 60000);
+  setInterval(() => {
+    if (!document.hidden) fetchIntelligence();
+  }, 900000);
 
-  boot();
 })();

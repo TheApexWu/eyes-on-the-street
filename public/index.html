@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>EYES ON THE STREET</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css" rel="stylesheet">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -34,16 +34,13 @@
 
     #map { width: 100vw; height: 100vh; }
 
-    /* Canvas overlays - stacked on top of map, under HUD */
-    .canvas-overlay {
+    /* Pulse ring canvas overlay */
+    #pulseCanvas {
       position: fixed;
       top: 0; left: 0;
       pointer-events: none;
-      z-index: 400;
+      z-index: 2;
     }
-
-    #particleCanvas { z-index: 401; }
-    #stationCanvas { z-index: 402; }
 
     /* Scanline overlay */
     .scanline {
@@ -186,7 +183,7 @@
 
     .alert-badge.active { background: var(--red); }
 
-    /* Intelligence Panel - bottom right */
+    /* Intelligence Panel */
     .intel-panel {
       position: fixed;
       bottom: 20px;
@@ -358,8 +355,8 @@
       font-size: 11px;
     }
 
-    /* Station popup */
-    .leaflet-popup-content-wrapper {
+    /* Mapbox popup overrides */
+    .mapboxgl-popup-content {
       background: var(--panel) !important;
       color: var(--text) !important;
       border-radius: 4px !important;
@@ -367,15 +364,17 @@
       font-family: var(--font) !important;
       font-size: 11px !important;
       box-shadow: 0 4px 20px rgba(0,0,0,0.6) !important;
+      padding: 10px 14px !important;
     }
 
-    .leaflet-popup-tip {
-      background: rgba(0,0,0,0.92) !important;
+    .mapboxgl-popup-tip {
+      border-top-color: rgba(0,0,0,0.92) !important;
     }
 
-    .leaflet-popup-content {
-      margin: 10px 14px !important;
-      line-height: 1.6 !important;
+    .mapboxgl-popup-close-button {
+      color: var(--text-dim) !important;
+      font-size: 16px !important;
+      font-family: var(--font) !important;
     }
 
     .popup-station-name {
@@ -416,24 +415,205 @@
     .popup-anomaly.surge { background: var(--red-dim); color: var(--red); }
     .popup-anomaly.quiet { background: rgba(0,204,255,0.1); color: var(--cyan); }
 
-    /* Leaflet controls restyle */
-    .leaflet-control-zoom a {
-      background: var(--panel) !important;
-      color: var(--text) !important;
-      border-color: var(--border) !important;
-      font-family: var(--font) !important;
+    /* Night mode badge */
+    .night-badge {
+      background: var(--red);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 3px;
+      letter-spacing: 0.15em;
+      animation: pulse-red 2s ease-in-out infinite;
     }
 
-    .leaflet-control-zoom a:hover { background: rgba(30,30,30,0.95) !important; }
+    /* Safety stat colors */
+    .safety-safe { color: var(--green); font-weight: 600; }
+    .safety-caution { color: var(--amber); font-weight: 600; }
+    .safety-avoid { color: var(--red); font-weight: 600; }
 
-    .leaflet-control-attribution {
+    /* Night mode body class */
+    body.night-mode .hud-bar {
+      border-bottom-color: rgba(255, 34, 68, 0.2);
+    }
+
+    body.night-mode .intel-panel {
+      border-color: rgba(255, 34, 68, 0.15);
+    }
+
+    body.night-mode .hud-title {
+      color: var(--red);
+    }
+
+    /* Rotation controls */
+    .rotate-controls {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      z-index: 1000;
+      display: flex;
+      gap: 8px;
+    }
+
+    .rotate-btn {
+      width: 52px;
+      height: 52px;
+      border-radius: 8px;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.2s, color 0.2s;
+      user-select: none;
+    }
+
+    .rotate-btn:hover {
+      border-color: var(--green);
+      color: var(--green);
+    }
+
+    .rotate-btn:active {
+      background: rgba(0,255,136,0.08);
+    }
+
+    /* Station search */
+    .station-search {
+      position: fixed;
+      top: 54px;
+      left: 10px;
+      z-index: 1000;
+      width: 280px;
+    }
+
+    .station-search-input {
+      width: 100%;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      outline: none;
+    }
+
+    .station-search-input::placeholder {
+      color: var(--text-dim);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .station-search-input:focus {
+      border-color: var(--green);
+    }
+
+    .station-results {
+      margin-top: 4px;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      max-height: 260px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    .station-results.visible { display: block; }
+
+    .station-result-item {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-size: 11px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .station-result-item:last-child { border-bottom: none; }
+
+    .station-result-item:hover {
+      background: rgba(0,255,136,0.06);
+      color: var(--green);
+    }
+
+    .station-result-name { flex: 1; }
+
+    .station-result-riders {
+      font-size: 9px;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+      margin-left: 8px;
+    }
+
+    .station-result-anomaly {
+      font-size: 8px;
+      font-weight: 600;
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-left: 6px;
+    }
+
+    .station-result-anomaly.surge { background: var(--red-dim); color: var(--red); }
+    .station-result-anomaly.quiet { background: rgba(0,204,255,0.1); color: var(--cyan); }
+
+    /* Mapbox controls restyle */
+    .mapboxgl-ctrl-group {
+      background: var(--panel) !important;
+      border: 1px solid var(--border) !important;
+    }
+
+    .mapboxgl-ctrl-group button {
+      background: transparent !important;
+      color: var(--text) !important;
+    }
+
+    .mapboxgl-ctrl-group button + button {
+      border-top: 1px solid var(--border) !important;
+    }
+
+    .mapboxgl-ctrl-attrib {
       background: var(--panel) !important;
       color: var(--text-dim) !important;
       font-family: var(--font) !important;
       font-size: 9px !important;
     }
 
-    .leaflet-control-attribution a { color: var(--text-dim) !important; }
+    .mapboxgl-ctrl-attrib a { color: var(--text-dim) !important; }
+
+    /* No-token warning */
+    .token-warning {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 2000;
+      background: var(--panel);
+      border: 1px solid var(--red);
+      border-radius: 8px;
+      padding: 30px 40px;
+      text-align: center;
+      font-size: 13px;
+      max-width: 500px;
+    }
+
+    .token-warning code {
+      display: block;
+      margin: 12px 0;
+      padding: 8px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--amber);
+    }
 
     @media (max-width: 768px) {
       .hud-bar { padding: 0 10px; font-size: 10px; }
@@ -475,6 +655,12 @@
         <span class="val" id="anomalyCount">--</span>
       </div>
       <div class="hud-divider"></div>
+      <div class="hud-stat">
+        <span class="label">Safety</span>
+        <span class="val" id="safetyStats">--</span>
+      </div>
+      <span class="night-badge" id="nightBadge" style="display:none">NIGHT</span>
+      <div class="hud-divider"></div>
       <div class="alert-trigger" onclick="toggleAlerts()">
         <span>Alerts</span>
         <span class="alert-badge" id="alertBadge">0</span>
@@ -484,7 +670,6 @@
     </div>
   </div>
 
-  <!-- Intelligence Panel -->
   <div class="intel-panel" id="intelPanel">
     <div class="intel-header">
       <span>Intelligence</span>
@@ -494,7 +679,6 @@
     <div class="intel-anomalies" id="intelAnomalies"></div>
   </div>
 
-  <!-- Alert Panel -->
   <div class="alerts-panel" id="alertsPanel">
     <div class="alerts-panel-header">
       <span>Service Alerts</span>
@@ -505,12 +689,20 @@
     </div>
   </div>
 
-  <div id="map"></div>
-  <canvas id="particleCanvas" class="canvas-overlay"></canvas>
-  <canvas id="stationCanvas" class="canvas-overlay"></canvas>
+  <div class="station-search">
+    <input type="text" class="station-search-input" id="stationSearch" placeholder="Search stations..." autocomplete="off">
+    <div class="station-results" id="stationResults"></div>
+  </div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="simulation.js"></script>
+  <div class="rotate-controls">
+    <button class="rotate-btn" id="rotateCCW" title="Rotate left">&#x21BA;</button>
+    <button class="rotate-btn" id="rotateCW" title="Rotate right">&#x21BB;</button>
+  </div>
+
+  <div id="map"></div>
+  <canvas id="pulseCanvas"></canvas>
+
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.js"></script>
   <script src="stations.js"></script>
   <script src="app.js"></script>
 </body>
