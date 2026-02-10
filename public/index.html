@@ -3,708 +3,515 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NYC MTA Live Subway Map</title>
+  <title>EYES ON THE STREET</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-
-    #map {
-      width: 100vw;
-      height: 100vh;
+    :root {
+      --green: #00ff88;
+      --green-dim: #00ff8833;
+      --amber: #ff8800;
+      --amber-dim: #ff880033;
+      --red: #ff2244;
+      --red-dim: #ff224433;
+      --cyan: #00ccff;
+      --text: #e0e0e0;
+      --text-dim: #666;
+      --panel: rgba(0, 0, 0, 0.92);
+      --border: rgba(255, 255, 255, 0.08);
+      --font: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
     }
 
-    .header {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: var(--font);
+      background: #000;
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    #map { width: 100vw; height: 100vh; }
+
+    /* Canvas overlays - stacked on top of map, under HUD */
+    .canvas-overlay {
+      position: fixed;
+      top: 0; left: 0;
+      pointer-events: none;
+      z-index: 400;
+    }
+
+    #particleCanvas { z-index: 401; }
+    #stationCanvas { z-index: 402; }
+
+    /* Scanline overlay */
+    .scanline {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.03) 2px,
+        rgba(0, 0, 0, 0.03) 4px
+      );
+    }
+
+    /* HUD Top Bar */
+    .hud-bar {
+      position: fixed;
+      top: 0; left: 0; right: 0;
       z-index: 1000;
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      padding: 12px 20px;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      letter-spacing: 0.05em;
+    }
+
+    .hud-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .hud-title {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+
+    .hud-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--green);
+    }
+
+    .hud-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .hud-dot.error { background: var(--red); animation-name: pulse-red; }
+    .hud-dot.loading { background: var(--amber); animation-name: pulse-amber; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--green); }
+      50% { opacity: 0.3; box-shadow: none; }
+    }
+    @keyframes pulse-red {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--red); }
+      50% { opacity: 0.3; box-shadow: none; }
+    }
+    @keyframes pulse-amber {
+      0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--amber); }
+      50% { opacity: 0.3; box-shadow: none; }
+    }
+
+    .hud-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .hud-stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-dim);
+    }
+
+    .hud-stat .val {
+      color: var(--text);
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hud-stat .label {
+      text-transform: uppercase;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+    }
+
+    .hud-clock {
+      color: var(--green);
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hud-divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+    }
+
+    .alert-trigger {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      user-select: none;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+    }
+
+    .alert-trigger:hover { color: var(--text); }
+
+    .alert-badge {
+      background: var(--text-dim);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 8px;
+      min-width: 16px;
+      text-align: center;
+    }
+
+    .alert-badge.active { background: var(--red); }
+
+    /* Intelligence Panel - bottom right */
+    .intel-panel {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      max-width: 380px;
+      min-width: 300px;
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .intel-header {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--text-dim);
+      margin-bottom: 8px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      backdrop-filter: blur(10px);
     }
 
-    .header h1 {
-      font-size: 18px;
-      font-weight: 600;
+    .intel-header .intel-time {
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
     }
 
-    .header .subtitle {
-      font-size: 12px;
-      opacity: 0.7;
-      margin-left: 12px;
+    .intel-report {
+      color: var(--text);
+      white-space: pre-wrap;
+      margin-bottom: 8px;
     }
 
-    .stats {
+    .intel-report.empty {
+      color: var(--text-dim);
+      font-style: italic;
+    }
+
+    .intel-anomalies {
+      border-top: 1px solid var(--border);
+      padding-top: 8px;
+    }
+
+    .intel-anomaly {
       display: flex;
-      gap: 20px;
-      font-size: 13px;
-    }
-
-    .stat {
-      display: flex;
+      justify-content: space-between;
       align-items: center;
-      gap: 6px;
+      padding: 3px 0;
+      font-size: 10px;
     }
 
-    .stat-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      animation: pulse 2s infinite;
+    .intel-anomaly-name { color: var(--text-dim); }
+    .intel-anomaly-score { font-weight: 500; }
+    .intel-anomaly-score.positive { color: var(--red); }
+    .intel-anomaly-score.negative { color: var(--cyan); }
+
+    /* Alert Panel */
+    .alerts-panel {
+      position: fixed;
+      top: 44px;
+      right: 0;
+      width: 380px;
+      max-height: calc(100vh - 44px);
+      z-index: 1001;
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border-left: 1px solid var(--border);
+      display: none;
+      flex-direction: column;
     }
 
-    .stat-dot.live { background: #00ff88; }
-    .stat-dot.loading { background: #ffaa00; }
-    .stat-dot.error { background: #ff4444; }
+    .alerts-panel.visible { display: flex; }
 
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+    .alerts-panel-header {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
     }
 
-    .legend {
-      position: absolute;
-      bottom: 30px;
-      left: 20px;
-      z-index: 1000;
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      padding: 15px;
-      border-radius: 8px;
-      font-size: 12px;
-      backdrop-filter: blur(10px);
-      max-height: 300px;
-      overflow-y: auto;
-    }
-
-    .legend h3 {
-      margin-bottom: 10px;
+    .alerts-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
       font-size: 14px;
+      cursor: pointer;
+      font-family: var(--font);
     }
 
-    .legend-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 6px;
+    .alerts-close:hover { color: var(--text); }
+
+    .alerts-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
     }
 
-    .legend-item {
+    .alert-item {
+      background: rgba(255,255,255,0.02);
+      border-radius: 4px;
+      padding: 10px 12px;
+      margin-bottom: 6px;
+      border-left: 2px solid var(--text-dim);
+      font-size: 11px;
+    }
+
+    .alert-item.critical { border-left-color: var(--red); background: var(--red-dim); }
+    .alert-item.high { border-left-color: var(--amber); background: var(--amber-dim); }
+    .alert-item.medium { border-left-color: #ffcc00; }
+
+    .alert-item-top {
       display: flex;
-      align-items: center;
-      gap: 6px;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 4px;
     }
 
-    .legend-circle {
+    .alert-routes { display: flex; flex-wrap: wrap; gap: 3px; }
+
+    .alert-route-badge {
       width: 18px;
       height: 18px;
       border-radius: 50%;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 10px;
-      font-weight: bold;
+      font-size: 9px;
+      font-weight: 600;
       color: white;
     }
 
-    .train-marker {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      border: 2px solid white;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      font-weight: bold;
-      color: white;
-      transition: transform 0.3s;
-    }
-
-    .train-marker:hover {
-      transform: scale(1.2);
-    }
-
-    .station-marker {
-      width: 8px;
-      height: 8px;
-      background: white;
-      border: 2px solid #333;
-      border-radius: 50%;
-    }
-
-    .info-panel {
-      position: absolute;
-      bottom: 30px;
-      right: 20px;
-      z-index: 1000;
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      padding: 15px;
-      border-radius: 8px;
-      font-size: 12px;
-      backdrop-filter: blur(10px);
-      max-width: 280px;
-    }
-
-    .info-panel h3 {
-      margin-bottom: 8px;
-    }
-
-    .info-panel p {
-      opacity: 0.8;
-      line-height: 1.5;
-    }
-
-    .refresh-btn {
-      position: absolute;
-      top: 70px;
-      right: 20px;
-      z-index: 1000;
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      border: none;
-      padding: 10px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      backdrop-filter: blur(10px);
-    }
-
-    .refresh-btn:hover {
-      background: rgba(40, 40, 40, 0.9);
-    }
-
-    .leaflet-popup-content-wrapper {
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
-      border-radius: 8px;
-    }
-
-    .leaflet-popup-tip {
-      background: rgba(0, 0, 0, 0.9);
-    }
-
-    /* Alert styles */
-    .alert-banner {
-      position: absolute;
-      top: 52px;
-      left: 0;
-      right: 0;
-      z-index: 999;
-      background: linear-gradient(90deg, #ff4444 0%, #cc0000 100%);
-      color: white;
-      padding: 8px 20px;
-      font-size: 13px;
-      display: none;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-    }
-
-    .alert-banner.visible {
-      display: flex;
-    }
-
-    .alert-banner .alert-icon {
-      font-size: 16px;
-    }
-
-    .alert-count-badge {
-      background: #ff4444;
-      color: white;
-      padding: 2px 6px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: bold;
-      margin-left: 4px;
-    }
-
-    .alerts-panel {
-      position: absolute;
-      top: 52px;
-      right: 0;
-      width: 380px;
-      max-height: calc(100vh - 80px);
-      z-index: 1001;
-      background: rgba(0, 0, 0, 0.95);
-      color: white;
-      border-radius: 0 0 0 8px;
-      overflow: hidden;
-      display: none;
-      flex-direction: column;
-      backdrop-filter: blur(10px);
-    }
-
-    .alerts-panel.visible {
-      display: flex;
-    }
-
-    .alerts-panel-header {
-      padding: 15px;
-      border-bottom: 1px solid rgba(255,255,255,0.1);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .alerts-panel-header h3 {
-      font-size: 14px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .alerts-panel-close {
-      background: none;
-      border: none;
-      color: white;
-      font-size: 20px;
-      cursor: pointer;
-      opacity: 0.7;
-    }
-
-    .alerts-panel-close:hover {
-      opacity: 1;
-    }
-
-    .alerts-list {
-      flex: 1;
-      overflow-y: auto;
-      padding: 10px;
-    }
-
-    .alert-item {
-      background: rgba(255,255,255,0.05);
-      border-radius: 6px;
-      padding: 12px;
-      margin-bottom: 10px;
-      border-left: 3px solid #666;
-    }
-
-    .alert-item.critical {
-      border-left-color: #ff4444;
-      background: rgba(255,68,68,0.1);
-    }
-
-    .alert-item.high {
-      border-left-color: #ff8800;
-      background: rgba(255,136,0,0.1);
-    }
-
-    .alert-item.medium {
-      border-left-color: #ffcc00;
-    }
-
-    .alert-item.low {
-      border-left-color: #00cc88;
-    }
-
-    .alert-item-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 6px;
-    }
-
-    .alert-routes {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
-    }
-
-    .alert-route {
-      width: 20px;
-      height: 20px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 10px;
-      font-weight: bold;
-      color: white;
-    }
-
-    .alert-effect {
-      font-size: 10px;
+    .alert-effect-tag {
+      font-size: 9px;
       padding: 2px 6px;
       border-radius: 3px;
-      background: rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.1);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      white-space: nowrap;
     }
 
     .alert-title {
-      font-size: 13px;
-      font-weight: 500;
-      margin-bottom: 4px;
-      line-height: 1.3;
-    }
-
-    .alert-description {
       font-size: 11px;
-      opacity: 0.7;
       line-height: 1.4;
-      max-height: 60px;
+      margin-bottom: 2px;
+    }
+
+    .alert-desc {
+      font-size: 10px;
+      color: var(--text-dim);
+      line-height: 1.3;
+      max-height: 48px;
       overflow: hidden;
-    }
-
-    .alerts-toggle {
-      position: absolute;
-      top: 70px;
-      right: 120px;
-      z-index: 1000;
-      background: rgba(0, 0, 0, 0.85);
-      color: white;
-      border: none;
-      padding: 10px 16px;
-      border-radius: 6px;
-      cursor: pointer;
-      font-size: 13px;
-      backdrop-filter: blur(10px);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .alerts-toggle:hover {
-      background: rgba(40, 40, 40, 0.9);
-    }
-
-    .alerts-toggle .badge {
-      background: #ff4444;
-      padding: 2px 6px;
-      border-radius: 8px;
-      font-size: 11px;
     }
 
     .no-alerts {
       text-align: center;
       padding: 40px 20px;
-      opacity: 0.6;
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    /* Station popup */
+    .leaflet-popup-content-wrapper {
+      background: var(--panel) !important;
+      color: var(--text) !important;
+      border-radius: 4px !important;
+      border: 1px solid var(--border) !important;
+      font-family: var(--font) !important;
+      font-size: 11px !important;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6) !important;
+    }
+
+    .leaflet-popup-tip {
+      background: rgba(0,0,0,0.92) !important;
+    }
+
+    .leaflet-popup-content {
+      margin: 10px 14px !important;
+      line-height: 1.6 !important;
+    }
+
+    .popup-station-name {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: #fff;
+    }
+
+    .popup-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 2px 0;
+    }
+
+    .popup-label {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+    }
+
+    .popup-value {
+      font-weight: 500;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .popup-anomaly {
+      margin-top: 6px;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 500;
+      text-align: center;
+    }
+
+    .popup-anomaly.surge { background: var(--red-dim); color: var(--red); }
+    .popup-anomaly.quiet { background: rgba(0,204,255,0.1); color: var(--cyan); }
+
+    /* Leaflet controls restyle */
+    .leaflet-control-zoom a {
+      background: var(--panel) !important;
+      color: var(--text) !important;
+      border-color: var(--border) !important;
+      font-family: var(--font) !important;
+    }
+
+    .leaflet-control-zoom a:hover { background: rgba(30,30,30,0.95) !important; }
+
+    .leaflet-control-attribution {
+      background: var(--panel) !important;
+      color: var(--text-dim) !important;
+      font-family: var(--font) !important;
+      font-size: 9px !important;
+    }
+
+    .leaflet-control-attribution a { color: var(--text-dim) !important; }
+
+    @media (max-width: 768px) {
+      .hud-bar { padding: 0 10px; font-size: 10px; }
+      .hud-title { font-size: 10px; letter-spacing: 0.1em; }
+      .hud-stat .label { display: none; }
+      .intel-panel {
+        bottom: 10px; right: 10px; left: 10px;
+        max-width: none; min-width: 0;
+      }
+      .alerts-panel { width: 100%; }
     }
   </style>
 </head>
 <body>
-  <div class="header">
-    <div style="display: flex; align-items: center;">
-      <h1>NYC MTA Live Subway Map</h1>
-      <span class="subtitle">Real-time train positions</span>
+  <div class="scanline"></div>
+
+  <div class="hud-bar">
+    <div class="hud-left">
+      <span class="hud-title">Eyes on the Street</span>
+      <div class="hud-divider"></div>
+      <div class="hud-status">
+        <div class="hud-dot" id="statusDot"></div>
+        <span id="statusText">INIT</span>
+      </div>
+      <div class="hud-divider"></div>
+      <span id="cityPhase" style="color:var(--amber);font-size:10px;letter-spacing:0.1em;text-transform:uppercase"></span>
     </div>
-    <div class="stats">
-      <div class="stat">
-        <div class="stat-dot live" id="statusDot"></div>
-        <span id="statusText">Connecting...</span>
+    <div class="hud-right">
+      <div class="hud-stat">
+        <span class="label">Presence</span>
+        <span class="val" id="presenceCount">--</span>
       </div>
-      <div class="stat">
-        <span id="trainCount">0 trains</span>
+      <div class="hud-stat">
+        <span class="label">Stations</span>
+        <span class="val" id="stationCount">--</span>
       </div>
-      <div class="stat">
-        <span id="lastUpdate">--</span>
+      <div class="hud-stat">
+        <span class="label">Anomalies</span>
+        <span class="val" id="anomalyCount">--</span>
       </div>
+      <div class="hud-divider"></div>
+      <div class="alert-trigger" onclick="toggleAlerts()">
+        <span>Alerts</span>
+        <span class="alert-badge" id="alertBadge">0</span>
+      </div>
+      <div class="hud-divider"></div>
+      <span class="hud-clock" id="clock">00:00:00</span>
     </div>
   </div>
 
-  <button class="alerts-toggle" onclick="toggleAlerts()">
-    Alerts <span class="badge" id="alertBadge">0</span>
-  </button>
-  <button class="refresh-btn" onclick="fetchTrains()">Refresh Now</button>
-
-  <div class="alert-banner" id="alertBanner" onclick="toggleAlerts()">
-    <span class="alert-icon">⚠</span>
-    <span id="alertBannerText">Service alerts active</span>
+  <!-- Intelligence Panel -->
+  <div class="intel-panel" id="intelPanel">
+    <div class="intel-header">
+      <span>Intelligence</span>
+      <span class="intel-time" id="intelTime"></span>
+    </div>
+    <div class="intel-report empty" id="intelReport">Awaiting first analysis...</div>
+    <div class="intel-anomalies" id="intelAnomalies"></div>
   </div>
 
+  <!-- Alert Panel -->
   <div class="alerts-panel" id="alertsPanel">
     <div class="alerts-panel-header">
-      <h3>⚠ Service Alerts</h3>
-      <button class="alerts-panel-close" onclick="toggleAlerts()">×</button>
+      <span>Service Alerts</span>
+      <button class="alerts-close" onclick="toggleAlerts()">x</button>
     </div>
     <div class="alerts-list" id="alertsList">
-      <div class="no-alerts">Loading alerts...</div>
+      <div class="no-alerts">Loading...</div>
     </div>
   </div>
 
   <div id="map"></div>
-
-  <div class="legend">
-    <h3>Subway Lines</h3>
-    <div class="legend-grid">
-      <div class="legend-item"><div class="legend-circle" style="background:#EE352E">1</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#EE352E">2</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#EE352E">3</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#00933C">4</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#00933C">5</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#00933C">6</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#B933AD">7</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#0039A6">A</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#0039A6">C</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#0039A6">E</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">B</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">D</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">F</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FF6319">M</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#6CBE45">G</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#996633">J</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#996633">Z</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#A7A9AC">L</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">N</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">Q</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">R</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#FCCC0A;color:#000">W</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#808183">S</div></div>
-      <div class="legend-item"><div class="legend-circle" style="background:#0039A6;font-size:8px">SIR</div></div>
-    </div>
-  </div>
-
-  <div class="info-panel">
-    <h3>About</h3>
-    <p>Real-time train positions from MTA GTFS-RT feeds. Trains update every 30 seconds. Click on trains for details.</p>
-    <p style="margin-top: 8px; font-size: 11px; opacity: 0.6;">Data source: api.mta.info</p>
-  </div>
+  <canvas id="particleCanvas" class="canvas-overlay"></canvas>
+  <canvas id="stationCanvas" class="canvas-overlay"></canvas>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    // Initialize map centered on NYC
-    const map = L.map('map', {
-      zoomControl: true
-    }).setView([40.7580, -73.9855], 12);
-
-    // Dark map tiles
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
-      maxZoom: 19
-    }).addTo(map);
-
-    // Line colors
-    const LINE_COLORS = {
-      '1': '#EE352E', '2': '#EE352E', '3': '#EE352E',
-      '4': '#00933C', '5': '#00933C', '6': '#00933C', '6X': '#00933C',
-      '7': '#B933AD', '7X': '#B933AD',
-      'A': '#0039A6', 'C': '#0039A6', 'E': '#0039A6',
-      'B': '#FF6319', 'D': '#FF6319', 'F': '#FF6319', 'FX': '#FF6319', 'M': '#FF6319',
-      'G': '#6CBE45',
-      'J': '#996633', 'Z': '#996633',
-      'L': '#A7A9AC',
-      'N': '#FCCC0A', 'Q': '#FCCC0A', 'R': '#FCCC0A', 'W': '#FCCC0A',
-      'S': '#808183', 'SF': '#808183', 'SR': '#808183', 'H': '#808183', 'FS': '#808183',
-      'SI': '#0039A6', 'SIR': '#0039A6'
-    };
-
-    // Store train markers
-    let trainMarkers = {};
-    let stationMarkers = [];
-
-    // Create custom train icon
-    function createTrainIcon(routeId, color) {
-      const textColor = ['N', 'Q', 'R', 'W'].includes(routeId) ? '#000' : '#fff';
-      const displayRoute = routeId.replace('X', '');
-
-      return L.divIcon({
-        className: 'train-icon',
-        html: `<div class="train-marker" style="background:${color}">${displayRoute}</div>`,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
-      });
-    }
-
-    // Fetch and display trains
-    async function fetchTrains() {
-      const statusDot = document.getElementById('statusDot');
-      const statusText = document.getElementById('statusText');
-
-      statusDot.className = 'stat-dot loading';
-      statusText.textContent = 'Updating...';
-
-      try {
-        const response = await fetch('/api/trains');
-        const data = await response.json();
-
-        // Update stats
-        document.getElementById('trainCount').textContent = `${data.trainCount} trains`;
-        document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-
-        statusDot.className = 'stat-dot live';
-        statusText.textContent = 'Live';
-
-        // Clear old markers that no longer exist
-        const currentIds = new Set(data.trains.map(t => t.id));
-        Object.keys(trainMarkers).forEach(id => {
-          if (!currentIds.has(id)) {
-            map.removeLayer(trainMarkers[id]);
-            delete trainMarkers[id];
-          }
-        });
-
-        // Update or add train markers
-        data.trains.forEach(train => {
-          const color = LINE_COLORS[train.routeId] || train.color || '#666';
-
-          if (trainMarkers[train.id]) {
-            // Update existing marker position
-            trainMarkers[train.id].setLatLng([train.latitude, train.longitude]);
-          } else {
-            // Create new marker
-            const marker = L.marker([train.latitude, train.longitude], {
-              icon: createTrainIcon(train.routeId, color)
-            });
-
-            const etaText = train.eta !== null && train.eta !== undefined
-              ? (train.eta <= 0 ? 'Arriving now' : `${train.eta} min`)
-              : '';
-
-            marker.bindPopup(`
-              <div style="text-align:center;min-width:120px;">
-                <div style="font-size:24px;font-weight:bold;margin-bottom:8px;">
-                  <span style="background:${color};padding:4px 12px;border-radius:12px;">${train.routeId}</span>
-                </div>
-                ${train.stopName ? `<div style="font-size:13px;margin-bottom:4px;"><b>${train.stopName}</b></div>` : ''}
-                ${etaText ? `<div style="font-size:14px;color:#00ff88;">${etaText}</div>` : ''}
-                ${train.source === 'gps' ? '<div style="font-size:10px;opacity:0.6;margin-top:4px;">GPS tracking</div>' : ''}
-              </div>
-            `);
-
-            marker.addTo(map);
-            trainMarkers[train.id] = marker;
-          }
-        });
-
-        console.log(`Updated ${data.trainCount} train positions`);
-
-      } catch (error) {
-        console.error('Error fetching trains:', error);
-        statusDot.className = 'stat-dot error';
-        statusText.textContent = 'Error';
-      }
-    }
-
-    // Load subway stations
-    async function loadStations() {
-      try {
-        const response = await fetch('https://data.ny.gov/api/views/39hk-dx4f/rows.json?accessType=DOWNLOAD');
-        const data = await response.json();
-
-        // Parse station data
-        const columns = data.meta.view.columns;
-        const latIdx = columns.findIndex(c => c.fieldName === 'gtfs_latitude');
-        const lonIdx = columns.findIndex(c => c.fieldName === 'gtfs_longitude');
-        const nameIdx = columns.findIndex(c => c.fieldName === 'stop_name');
-        const routesIdx = columns.findIndex(c => c.fieldName === 'daytime_routes');
-
-        data.data.forEach(row => {
-          const lat = parseFloat(row[latIdx]);
-          const lon = parseFloat(row[lonIdx]);
-          const name = row[nameIdx];
-          const routes = row[routesIdx];
-
-          if (lat && lon) {
-            const marker = L.circleMarker([lat, lon], {
-              radius: 4,
-              fillColor: '#fff',
-              color: '#333',
-              weight: 1,
-              opacity: 0.8,
-              fillOpacity: 0.9
-            });
-
-            marker.bindPopup(`<b>${name}</b><br>${routes}`);
-            marker.addTo(map);
-            stationMarkers.push(marker);
-          }
-        });
-
-        console.log(`Loaded ${stationMarkers.length} stations`);
-      } catch (error) {
-        console.error('Error loading stations:', error);
-      }
-    }
-
-    // Alerts state
-    let alertsVisible = false;
-    let currentAlerts = [];
-
-    function toggleAlerts() {
-      alertsVisible = !alertsVisible;
-      document.getElementById('alertsPanel').classList.toggle('visible', alertsVisible);
-    }
-
-    async function fetchAlerts() {
-      try {
-        const response = await fetch('/api/alerts');
-        const data = await response.json();
-        currentAlerts = data.alerts;
-
-        // Update badge
-        const badge = document.getElementById('alertBadge');
-        const criticalCount = currentAlerts.filter(a => a.severity === 'critical' || a.severity === 'high').length;
-        badge.textContent = currentAlerts.length;
-        badge.style.background = criticalCount > 0 ? '#ff4444' : '#666';
-
-        // Update banner
-        const banner = document.getElementById('alertBanner');
-        const bannerText = document.getElementById('alertBannerText');
-        if (criticalCount > 0) {
-          banner.classList.add('visible');
-          const criticalAlert = currentAlerts.find(a => a.severity === 'critical' || a.severity === 'high');
-          bannerText.textContent = criticalAlert?.header || `${criticalCount} service alert(s)`;
-        } else {
-          banner.classList.remove('visible');
-        }
-
-        // Render alerts list
-        renderAlerts();
-
-      } catch (error) {
-        console.error('Error fetching alerts:', error);
-      }
-    }
-
-    function renderAlerts() {
-      const container = document.getElementById('alertsList');
-
-      if (currentAlerts.length === 0) {
-        container.innerHTML = '<div class="no-alerts">No active service alerts</div>';
-        return;
-      }
-
-      container.innerHTML = currentAlerts.map(alert => {
-        const routeBadges = alert.affectedRoutes.slice(0, 8).map(route => {
-          const color = LINE_COLORS[route] || '#666';
-          const textColor = ['N', 'Q', 'R', 'W'].includes(route) ? '#000' : '#fff';
-          return `<div class="alert-route" style="background:${color};color:${textColor}">${route}</div>`;
-        }).join('');
-
-        return `
-          <div class="alert-item ${alert.severity}">
-            <div class="alert-item-header">
-              <div class="alert-routes">${routeBadges}</div>
-              <span class="alert-effect">${alert.effect}</span>
-            </div>
-            <div class="alert-title">${escapeHtml(alert.header)}</div>
-            ${alert.description ? `<div class="alert-description">${escapeHtml(alert.description)}</div>` : ''}
-          </div>
-        `;
-      }).join('');
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    // Initial load
-    loadStations();
-    fetchTrains();
-    fetchAlerts();
-
-    // Auto-refresh every 30 seconds
-    setInterval(fetchTrains, 30000);
-    setInterval(fetchAlerts, 60000);  // Alerts refresh every 60s
-  </script>
+  <script src="simulation.js"></script>
+  <script src="stations.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

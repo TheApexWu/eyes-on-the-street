@@ -1,15 +1,18 @@
 {
-  "name": "experimental-nyc-mta-live",
-  "version": "1.0.0",
-  "description": "Live NYC MTA Subway Train Map",
+  "name": "eyes-on-the-street",
+  "version": "2.0.0",
+  "description": "Crowd presence simulation for New York City streets",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "build-model": "node scripts/build-model.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
     "express": "^4.18.2",
-    "gtfs-realtime-bindings": "^1.1.1",
-    "cors": "^2.8.5"
+    "gtfs-realtime-bindings": "^1.1.1"
   }
 }
