@@ -8,7 +8,8 @@
         "includeFiles": [
           "public/data/**",
           "server.js"
-        ]
+        ],
+        "maxDuration": 30
       }
     },
     {

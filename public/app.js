@@ -145,7 +145,42 @@
 
   map.addSource('presence', { type: 'geojson', data: emptyGeoJSON });
 
-  // Heatmap layer (renders BELOW buildings so glow bleeds through)
+  // Bloom / glow layer: wide soft aura that bleeds outward from busy stations
+  map.addLayer({
+    id: 'presence-bloom',
+    type: 'heatmap',
+    source: 'presence',
+    maxzoom: 17,
+    paint: {
+      'heatmap-weight': ['get', 'weight'],
+      'heatmap-intensity': [
+        'interpolate', ['linear'], ['zoom'],
+        10, 0.4,
+        14, 0.7,
+        17, 1.0
+      ],
+      'heatmap-radius': [
+        'interpolate', ['linear'], ['zoom'],
+        10, 30,
+        12, 55,
+        14, 90,
+        16, 130
+      ],
+      'heatmap-color': [
+        'interpolate', ['linear'], ['heatmap-density'],
+        0,    'rgba(0,0,0,0)',
+        0.05, 'rgba(20,3,0,0.08)',
+        0.15, 'rgba(60,15,0,0.12)',
+        0.3,  'rgba(140,40,5,0.18)',
+        0.5,  'rgba(200,80,20,0.22)',
+        0.7,  'rgba(255,130,50,0.25)',
+        1.0,  'rgba(255,180,100,0.3)'
+      ],
+      'heatmap-opacity': 0.9
+    }
+  }, '3d-buildings'); // insert below buildings
+
+  // Core heatmap layer (sharper, brighter, on top of bloom)
   map.addLayer({
     id: 'presence-heat',
     type: 'heatmap',
@@ -179,9 +214,41 @@
       ],
       'heatmap-opacity': 0.85
     }
-  }, '3d-buildings'); // insert below buildings
+  });
 
-  // Station circles (visible at higher zoom) - colored by safety level
+  // Station glow (soft large circle behind each station for luminous halo)
+  map.addLayer({
+    id: 'station-glow',
+    type: 'circle',
+    source: 'presence',
+    minzoom: 12,
+    paint: {
+      'circle-radius': [
+        'interpolate', ['linear'], ['get', 'ridership'],
+        0, 6,
+        500, 10,
+        2000, 16,
+        5000, 22
+      ],
+      'circle-color': [
+        'match', ['get', 'safetyLevel'],
+        'safe', '#00ff88',
+        'caution', '#ff8800',
+        'avoid', '#ff2244',
+        '#ffaa44'
+      ],
+      'circle-opacity': [
+        'interpolate', ['linear'], ['get', 'ridership'],
+        0, 0.05,
+        500, 0.1,
+        2000, 0.15,
+        5000, 0.2
+      ],
+      'circle-blur': 1
+    }
+  });
+
+  // Station circles (solid core dot) - colored by safety level
   map.addLayer({
     id: 'station-circles',
     type: 'circle',
@@ -202,8 +269,8 @@
         'avoid', '#ff2244',
         '#ffaa44'
       ],
-      'circle-opacity': 0.8,
-      'circle-blur': 0.3,
+      'circle-opacity': 0.9,
+      'circle-blur': 0.15,
       'circle-stroke-width': [
         'match', ['get', 'safetyLevel'],
         'avoid', 1.5,
@@ -300,8 +367,10 @@
   // ---------------------------------------------------------------------------
   setInterval(() => {
     const t = performance.now() * 0.001;
+    const breathe = Math.sin(t * 0.15);
     try {
-      map.setPaintProperty('presence-heat', 'heatmap-opacity', 0.80 + Math.sin(t * 0.12) * 0.05);
+      map.setPaintProperty('presence-heat', 'heatmap-opacity', 0.80 + breathe * 0.08);
+      map.setPaintProperty('presence-bloom', 'heatmap-opacity', 0.85 + breathe * 0.1);
     } catch (e) {}
   }, 2000);
 
@@ -336,10 +405,17 @@
         reportEl.textContent = data.report;
         reportEl.classList.remove('empty');
       } else if (data.error) {
-        reportEl.textContent = data.error === 'No API key configured'
+        const msg = data.error === 'No API key configured'
           ? 'Set ANTHROPIC_API_KEY in .env for AI analysis'
-          : 'Analysis unavailable';
+          : data.error.includes('Warming up')
+          ? 'System warming up. Intelligence report loading...'
+          : 'Analysis temporarily unavailable. Retrying...';
+        reportEl.textContent = msg;
         reportEl.classList.add('empty');
+        // Retry sooner if warming up
+        if (data.error.includes('Warming up')) {
+          setTimeout(fetchIntelligence, 15000);
+        }
       }
 
       if (data.generated) {
@@ -599,6 +675,6 @@
   setInterval(fetchAlerts, 60000);
   setInterval(() => {
     if (!document.hidden) fetchIntelligence();
-  }, 900000);
+  }, 300000); // 5 min, matches server-side cache TTL
 
 })();

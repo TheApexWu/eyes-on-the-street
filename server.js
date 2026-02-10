@@ -74,19 +74,32 @@ function computeSafetyLevel(ridership, crimeRisk, hour) {
   const isNight = hour >= 22 || hour < 6;
   const isEvening = hour >= 18 && hour < 22;
 
-  // Thresholds calibrated against actual NYC ridership levels:
-  // At midnight, Times Square does ~200/hr, a busy outer borough station does ~30/hr
-  // At 5pm rush, Times Square does ~5000/hr
-  // "Safe" = enough foot traffic + low crime risk for a newcomer to feel comfortable
-  const safeThreshold = isNight ? 40 : isEvening ? 80 : 30;
-  const cautionThreshold = isNight ? 10 : isEvening ? 25 : 10;
+  // Principle: an empty station with no crime history is just quiet, not dangerous.
+  // Only flag "avoid" when there's BOTH low foot traffic AND elevated crime risk.
+  // crimeRisk is 0-1 normalized: 1.0 = highest-crime station in NYC.
+  // Most stations cluster near 0. Only ~15% exceed 0.5.
 
-  // High crime risk overrides presence (a crowded but dangerous station is still caution)
-  if (crimeRisk >= 0.7) return ridership >= safeThreshold ? 'caution' : 'avoid';
-  if (crimeRisk >= 0.4 && ridership < safeThreshold) return 'caution';
-  if (ridership >= safeThreshold && crimeRisk < 0.4) return 'safe';
-  if (ridership >= cautionThreshold) return 'caution';
-  return 'avoid';
+  // DAYTIME (6am-6pm): NYC is overwhelmingly safe during business hours.
+  if (!isNight && !isEvening) {
+    if (crimeRisk >= 0.8 && ridership < 15) return 'caution';
+    return 'safe';
+  }
+
+  // EVENING (6pm-10pm): mostly safe, flag genuine hotspots
+  if (isEvening) {
+    if (crimeRisk >= 0.7 && ridership < 25) return 'avoid';
+    if (crimeRisk >= 0.5 && ridership < 15) return 'caution';
+    return 'safe';
+  }
+
+  // LATE NIGHT (10pm-6am): more nuanced
+  // AVOID = known crime corridor + empty platform
+  if (crimeRisk >= 0.5 && ridership < 15) return 'avoid';
+  // CAUTION = moderate risk factor present
+  if (crimeRisk >= 0.3 && ridership < 25) return 'caution';
+  if (ridership < 5 && crimeRisk >= 0.15) return 'caution';
+  // SAFE = enough eyes on the street
+  return 'safe';
 }
 
 // ---------------------------------------------------------------------------
@@ -494,12 +507,20 @@ app.get('/api/intelligence', async (req, res) => {
   }
 
   try {
-    // Get presence data directly (no self-fetch)
+    // Use cached presence data if available; only compute if no cache exists.
+    // This prevents the intelligence endpoint from doing heavy GTFS fetches
+    // during a cold start (which would exceed Vercel's function timeout).
     let presenceData;
-    if (cache['presence'] && Date.now() - cache['presence'].ts < 60000) {
+    if (cache['presence'] && Date.now() - cache['presence'].ts < 120000) {
       presenceData = cache['presence'].data;
     } else {
-      presenceData = await computePresence();
+      try {
+        presenceData = await computePresence();
+        cache['presence'] = { data: presenceData, ts: Date.now() };
+      } catch (presErr) {
+        console.error('[intelligence] presence computation failed:', presErr.message);
+        return res.json({ report: null, anomalies: [], generated: now, error: 'Warming up, try again shortly' });
+      }
     }
 
     const topStations = presenceData.stations.slice(0, 10);
