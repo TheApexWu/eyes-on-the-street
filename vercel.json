@@ -7,19 +7,14 @@
       "config": {
         "maxDuration": 30,
         "includeFiles": [
-          "public/data/**",
+          "public/**",
           "server.js"
         ]
       }
-    },
-    {
-      "src": "public/**",
-      "use": "@vercel/static"
     }
   ],
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index.js" },
-    { "source": "/health", "destination": "/api/index.js" }
+    { "source": "/(.*)", "destination": "/api/index.js" }
   ],
   "headers": [
     {
