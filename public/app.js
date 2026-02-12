@@ -90,22 +90,22 @@
   const empty = { type: 'FeatureCollection', features: [] };
   map.addSource('presence', { type: 'geojson', data: empty });
 
-  // Bloom glow (wide soft aura)
+  // Bloom glow — Neon Pulse (wide soft cyan aura)
   map.addLayer({
     id: 'presence-bloom', type: 'heatmap', source: 'presence', maxzoom: 17,
     paint: {
       'heatmap-weight': ['get', 'weight'],
       'heatmap-intensity': ['interpolate',['linear'],['zoom'], 10,0.4, 14,0.7, 17,1.0],
-      'heatmap-radius': ['interpolate',['linear'],['zoom'], 10,30, 12,55, 14,90, 16,130],
+      'heatmap-radius': ['interpolate',['linear'],['zoom'], 10,30, 12,55, 14,95, 16,130],
       'heatmap-color': ['interpolate',['linear'],['heatmap-density'],
-        0,'rgba(0,0,0,0)', 0.05,'rgba(20,3,0,0.08)', 0.15,'rgba(60,15,0,0.12)',
-        0.3,'rgba(140,40,5,0.18)', 0.5,'rgba(200,80,20,0.22)',
-        0.7,'rgba(255,130,50,0.25)', 1.0,'rgba(255,180,100,0.3)'],
+        0,'rgba(0,0,0,0)', 0.05,'rgba(0,5,20,0.1)', 0.15,'rgba(0,20,60,0.15)',
+        0.3,'rgba(0,50,120,0.2)', 0.5,'rgba(0,100,180,0.25)',
+        0.7,'rgba(0,160,255,0.3)', 1.0,'rgba(100,220,255,0.35)'],
       'heatmap-opacity': 0.9
     }
   }, '3d-buildings');
 
-  // Core heatmap
+  // Core heatmap — Neon Pulse (electric cyan)
   map.addLayer({
     id: 'presence-heat', type: 'heatmap', source: 'presence', maxzoom: 17,
     paint: {
@@ -113,10 +113,10 @@
       'heatmap-intensity': ['interpolate',['linear'],['zoom'], 10,0.8, 14,1.5, 17,2.5],
       'heatmap-radius': ['interpolate',['linear'],['zoom'], 10,12, 12,22, 14,40, 16,60],
       'heatmap-color': ['interpolate',['linear'],['heatmap-density'],
-        0,'rgba(0,0,0,0)', 0.05,'rgba(30,5,0,0.2)', 0.15,'rgba(80,20,0,0.35)',
-        0.3,'rgba(180,60,10,0.45)', 0.5,'rgba(255,120,40,0.55)',
-        0.7,'rgba(255,170,80,0.65)', 0.9,'rgba(255,210,140,0.75)',
-        1.0,'rgba(255,240,200,0.85)'],
+        0,'rgba(0,0,0,0)', 0.05,'rgba(0,10,30,0.25)', 0.15,'rgba(0,40,80,0.4)',
+        0.3,'rgba(0,80,160,0.5)', 0.5,'rgba(0,150,255,0.6)',
+        0.7,'rgba(50,200,255,0.7)', 0.9,'rgba(150,230,255,0.8)',
+        1.0,'rgba(220,245,255,0.9)'],
       'heatmap-opacity': 0.85
     }
   });
@@ -126,7 +126,7 @@
     id: 'station-glow', type: 'circle', source: 'presence', minzoom: 12,
     paint: {
       'circle-radius': ['interpolate',['linear'],['get','ridership'], 0,6, 500,10, 2000,16, 5000,22],
-      'circle-color': ['match',['get','safetyLevel'], 'safe','#00ff88', 'caution','#ff8800', 'avoid','#ff2244', '#ffaa44'],
+      'circle-color': ['match',['get','safetyLevel'], 'safe','#00ff88', 'caution','#ffcc00', 'avoid','#ff2244', '#66ccff'],
       'circle-opacity': ['interpolate',['linear'],['get','ridership'], 0,0.05, 500,0.1, 2000,0.15, 5000,0.2],
       'circle-blur': 1
     }
@@ -137,16 +137,91 @@
     id: 'station-circles', type: 'circle', source: 'presence', minzoom: 12,
     paint: {
       'circle-radius': ['interpolate',['linear'],['get','ridership'], 0,2, 500,3, 2000,5, 5000,7],
-      'circle-color': ['match',['get','safetyLevel'], 'safe','#00ff88', 'caution','#ff8800', 'avoid','#ff2244', '#ffaa44'],
+      'circle-color': ['match',['get','safetyLevel'], 'safe','#00ff88', 'caution','#ffcc00', 'avoid','#ff2244', '#66ccff'],
       'circle-opacity': 0.9, 'circle-blur': 0.15,
       'circle-stroke-width': ['match',['get','safetyLevel'], 'avoid',1.5, 0.5],
       'circle-stroke-color': ['match',['get','safetyLevel'],
-        'avoid','rgba(255,34,68,0.6)', 'caution','rgba(255,136,0,0.3)', 'rgba(255,255,255,0.15)']
+        'avoid','rgba(255,34,68,0.6)', 'caution','rgba(255,204,0,0.3)', 'rgba(255,255,255,0.15)']
     }
   });
 
   // Presence data
   let presenceData = null;
+
+  // Client-side models for popup calculations
+  let clientRidershipModel = null, clientCrimeModel = null;
+  async function loadClientModels() {
+    try {
+      const [rm, cm] = await Promise.all([
+        fetch('/data/ridership-model.json').then(r => r.ok ? r.json() : null),
+        fetch('/data/crime-model.json').then(r => r.ok ? r.json() : null)
+      ]);
+      clientRidershipModel = rm;
+      clientCrimeModel = cm;
+      console.log('[models] loaded client-side models');
+    } catch (e) { console.warn('[models] failed to load:', e.message); }
+  }
+
+  function computeSafetyLevelClient(ridership, crimeRisk, hour) {
+    const isNight = hour >= 22 || hour < 6;
+    const isEvening = hour >= 18 && hour < 22;
+    if (!isNight && !isEvening) {
+      if (crimeRisk >= 0.8 && ridership < 15) return 'caution';
+      return 'safe';
+    }
+    if (isEvening) {
+      if (crimeRisk >= 0.7 && ridership < 25) return 'avoid';
+      if (crimeRisk >= 0.5 && ridership < 15) return 'caution';
+      return 'safe';
+    }
+    if (crimeRisk >= 0.5 && ridership < 15) return 'avoid';
+    if (crimeRisk >= 0.3 && ridership < 25) return 'caution';
+    if (ridership < 5 && crimeRisk >= 0.15) return 'caution';
+    return 'safe';
+  }
+
+  function haversineMiles(lat1, lon1, lat2, lon2) {
+    const R = 3959;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  function getSafestHours(stationId) {
+    if (!clientRidershipModel?.stations?.[stationId] || !clientCrimeModel?.stationRisk?.[stationId]) return null;
+    const rs = clientRidershipModel.stations[stationId];
+    const cs = clientCrimeModel.stationRisk[stationId];
+    const now = new Date();
+    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][now.getDay()];
+    const hourly = rs.hourly?.[dow];
+    if (!hourly) return null;
+
+    const isWeekend = now.getDay() === 0 || now.getDay() === 6;
+    const scores = [];
+    for (let h = 0; h < 24; h++) {
+      const rid = hourly[h] || 0;
+      const crime = (isWeekend ? cs.weekendRisk?.[h] : cs.weekdayRisk?.[h]) ?? cs.hourlyRisk?.[h] ?? 0;
+      // Score: higher ridership and lower crime = safer. Avoid div-by-zero.
+      const score = rid / (crime + 0.01);
+      scores.push({ hour: h, score, ridership: rid });
+    }
+    // Filter out dead hours with near-zero ridership
+    const viable = scores.filter(s => s.ridership > 10);
+    if (viable.length === 0) return scores.sort((a,b) => b.score - a.score).slice(0, 3);
+    return viable.sort((a, b) => b.score - a.score).slice(0, 3);
+  }
+
+  function getNearestSafe(station) {
+    if (!presenceData?.stations) return [];
+    const safeStations = presenceData.stations.filter(s =>
+      s.safetyLevel === 'safe' && s.id !== station.id
+    );
+    return safeStations.map(s => ({
+      ...s,
+      distance: haversineMiles(station.lat, station.lon, s.lat, s.lon)
+    })).sort((a, b) => a.distance - b.distance).slice(0, 3);
+  }
 
   function toGeoJSON(data) {
     const max = data.stations.reduce((m, s) => Math.max(m, s.ridership || 0), 1);
@@ -160,7 +235,10 @@
           weight: (s.ridership || 0) / max, anomalyScore: s.anomalyScore || 0,
           isAnomaly: s.isAnomaly || false, trainCount: s.trainCount || 0,
           crimeRisk: s.crimeRisk || 0, crimeTotal: s.crimeTotal || 0,
-          topCrimeType: s.topCrimeType || '', safetyLevel: s.safetyLevel || 'safe'
+          topCrimeType: s.topCrimeType || '', safetyLevel: s.safetyLevel || 'safe',
+          hasDisruption: s.hasDisruption || false,
+          disruptionEffect: s.disruptionEffect || '',
+          disruptionRoutes: s.disruptionRoutes ? JSON.stringify(s.disruptionRoutes) : ''
         }
       }))
     };
@@ -169,6 +247,10 @@
   async function fetchPresence() {
     try {
       presenceData = await (await fetch('/api/presence')).json();
+
+      // In explore mode, store data but don't update the map
+      if (exploreMode) return;
+
       $('presenceCount').textContent = fmt(presenceData.totalPresence);
       $('stationCount').textContent = presenceData.stations.length;
       $('anomalyCount').textContent = presenceData.anomalyCount || 0;
@@ -186,6 +268,20 @@
       if (presenceData.safetyStats) {
         const ss = presenceData.safetyStats;
         $('safetyStats').innerHTML = `<span class="safety-safe">${ss.safe}</span>/<span class="safety-caution">${ss.caution}</span>/<span class="safety-avoid">${ss.avoid}</span>`;
+      }
+
+      // Weather display
+      const w = presenceData.weather;
+      if (w) {
+        $('weatherHud').style.display = '';
+        $('weatherInfo').textContent = `${w.condition} ${w.temp}°F`;
+        const mod = $('weatherModifier');
+        if (w.isSnow) { mod.textContent = '-30%'; mod.style.display = ''; }
+        else if (w.isRain) { mod.textContent = '-20%'; mod.style.display = ''; }
+        else if (w.isExtreme) { mod.textContent = '-15%'; mod.style.display = ''; }
+        else { mod.style.display = 'none'; }
+      } else {
+        $('weatherHud').style.display = 'none';
       }
 
       map.getSource('presence').setData(toGeoJSON(presenceData));
@@ -212,41 +308,6 @@
     } catch (err) {
       console.error('[trains]', err);
     }
-  }
-
-  // Intelligence
-  async function fetchIntelligence() {
-    try {
-      const data = await (await fetch('/api/intelligence')).json();
-      const reportEl = $('intelReport'), timeEl = $('intelTime'), anomEl = $('intelAnomalies');
-
-      if (data.report) {
-        reportEl.textContent = data.report;
-        reportEl.classList.remove('empty');
-      } else if (data.error) {
-        let msg;
-        if (data.error === 'No API key configured') msg = 'Set ANTHROPIC_API_KEY in .env';
-        else if (data.error.includes?.('Warming up')) { msg = 'Warming up...'; setTimeout(fetchIntelligence, 15000); }
-        else msg = data.debug ? `Error: ${data.debug}` : 'Analysis temporarily unavailable';
-        reportEl.textContent = msg;
-        reportEl.classList.add('empty');
-      }
-
-      if (data.generated) {
-        const d = new Date(data.generated);
-        timeEl.textContent = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-      }
-
-      if (data.anomalies?.length > 0) {
-        anomEl.innerHTML = data.anomalies.slice(0, 5).map(a => {
-          const pct = Math.round(a.score * 100), cls = pct > 0 ? 'positive' : 'negative';
-          return `<div class="intel-anomaly"><span class="intel-anomaly-name">${esc(a.name)}</span><span class="intel-anomaly-score ${cls}">${pct > 0 ? '+' : ''}${pct}%</span></div>`;
-        }).join('');
-        anomEl.style.display = '';
-      } else {
-        anomEl.style.display = 'none';
-      }
-    } catch (err) { console.error('[intelligence]', err); }
   }
 
   // Alerts
@@ -297,18 +358,86 @@
       anomalyHtml = `<div class="popup-anomaly ${cls}">${label} ${asign}${apct}% vs baseline</div>`;
     }
 
-    new mapboxgl.Popup({ closeButton: true }).setLngLat(coords).setHTML(`
+    // Disruption banner
+    let disruptionHtml = '';
+    if (p.hasDisruption && p.disruptionEffect) {
+      let routes = [];
+      try { routes = p.disruptionRoutes ? JSON.parse(p.disruptionRoutes) : []; } catch (e) {}
+      const routeBadges = routes.slice(0, 6).map(r => {
+        const c = LINE_COLORS[r] || '#666', tc = ['N','Q','R','W'].includes(r) ? '#000' : '#fff';
+        return `<div class="popup-disruption-route" style="background:${c};color:${tc}">${esc(r)}</div>`;
+      }).join('');
+      disruptionHtml = `<div class="popup-disruption">
+        <div style="font-weight:600">${esc(p.disruptionEffect).toUpperCase()}</div>
+        ${routeBadges ? `<div class="popup-disruption-routes">${routeBadges}</div>` : ''}
+      </div>`;
+    }
+
+    // Weather impact row
+    let weatherHtml = '';
+    const w = presenceData?.weather;
+    if (w && (w.isRain || w.isSnow || w.isExtreme)) {
+      const label = w.isSnow ? 'Snow' : w.isRain ? 'Rain' : 'Extreme';
+      const pct = w.isSnow ? '-30%' : w.isRain ? '-20%' : '-15%';
+      weatherHtml = `<div class="popup-row popup-weather-impact"><span class="popup-label">Weather</span><span class="popup-value">${label}: ${pct} presence</span></div>`;
+    }
+
+    // Safest hours
+    let safestHtml = '';
+    const safest = getSafestHours(p.id);
+    if (safest && safest.length > 0) {
+      const chips = safest.map(s => {
+        const h = s.hour;
+        const label = h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h-12) + 'p';
+        return `<span class="popup-hour-chip">${label}</span>`;
+      }).join('');
+      safestHtml = `<div class="popup-section"><div class="popup-section-title">Safest Hours</div><div class="popup-safest-hours">${chips}</div></div>`;
+    }
+
+    // Safer alternatives (only for caution/avoid)
+    let altHtml = '';
+    if ((sl === 'caution' || sl === 'avoid') && presenceData) {
+      const stationObj = presenceData.stations.find(s => s.id === p.id);
+      if (stationObj) {
+        const alts = getNearestSafe(stationObj);
+        if (alts.length > 0) {
+          const items = alts.map(a =>
+            `<div class="popup-alternative" data-lon="${a.lon}" data-lat="${a.lat}">
+              <span class="popup-alt-name">${esc(a.name)}</span>
+              <span class="popup-alt-dist">${a.distance.toFixed(2)}mi</span>
+              <span class="popup-alt-safety" style="background:var(--green)"></span>
+            </div>`
+          ).join('');
+          altHtml = `<div class="popup-section"><div class="popup-section-title">Safer Nearby</div>${items}</div>`;
+        }
+      }
+    }
+
+    const popup = new mapboxgl.Popup({ closeButton: true, maxWidth: '280px' }).setLngLat(coords).setHTML(`
       <div class="popup-station-name">${esc(p.name)}</div>
+      ${disruptionHtml}
       <div style="background:${slColors[sl]}20;color:${slColors[sl]};border:1px solid ${slColors[sl]}40;padding:3px 8px;border-radius:3px;font-size:10px;font-weight:600;text-align:center;margin-bottom:6px">${sl.toUpperCase()}</div>
       <div class="popup-row"><span class="popup-label">Current</span><span class="popup-value">${p.ridership.toLocaleString()}/hr</span></div>
       <div class="popup-row"><span class="popup-label">Baseline</span><span class="popup-value">${p.baseline.toLocaleString()}/hr</span></div>
       <div class="popup-row"><span class="popup-label">Deviation</span><span class="popup-value">${asign}${apct}%</span></div>
+      ${weatherHtml}
       <div class="popup-row"><span class="popup-label">Crime Risk</span><span class="popup-value" style="color:${crPct > 50 ? 'var(--red)' : crPct > 25 ? 'var(--amber)' : 'var(--green)'}">${crPct}%</span></div>
       <div class="popup-row"><span class="popup-label">Primary Threat</span><span class="popup-value">${p.topCrimeType ? esc(p.topCrimeType.toLowerCase()) : 'none'}</span></div>
       <div class="popup-row"><span class="popup-label">Incidents (6mo)</span><span class="popup-value">${p.crimeTotal || 0}</span></div>
       <div class="popup-row"><span class="popup-label">Trains nearby</span><span class="popup-value">${p.trainCount || 0}</span></div>
       ${anomalyHtml}
+      ${safestHtml}
+      ${altHtml}
     `).addTo(map);
+
+    // Safer alternatives click-to-fly
+    popup.getElement().addEventListener('click', ev => {
+      const alt = ev.target.closest('.popup-alternative');
+      if (alt?.dataset.lon) {
+        map.flyTo({ center: [+alt.dataset.lon, +alt.dataset.lat], zoom: 15, pitch: 55, duration: 1500 });
+        popup.remove();
+      }
+    });
   });
   map.on('mouseenter', 'station-circles', () => { map.getCanvas().style.cursor = 'pointer'; });
   map.on('mouseleave', 'station-circles', () => { map.getCanvas().style.cursor = ''; });
@@ -353,6 +482,7 @@
   updateClock();
   setInterval(updateClock, 1000);
   StationLayer.init(map);
+  loadClientModels(); // non-blocking, popups work without it
 
   setStatus('loading', 'FETCHING');
   await fetchPresence();
@@ -360,10 +490,123 @@
 
   fetchTrains();
   fetchAlerts();
-  fetchIntelligence();
 
   setInterval(fetchPresence, 30000);
   setInterval(fetchTrains, 30000);
   setInterval(fetchAlerts, 60000);
-  setInterval(() => { if (!document.hidden) fetchIntelligence(); }, 300000);
+
+  // ---------------------------------------------------------------------------
+  // TIME SCRUBBER — EXPLORE MODE
+  // ---------------------------------------------------------------------------
+  let exploreMode = false;
+  const scrubberToggle = $('scrubberToggle');
+  const scrubberSlider = $('scrubberSlider');
+  const scrubberTime = $('scrubberTime');
+  const scrubberPhase = $('scrubberPhase');
+
+  function formatScrubberHour(h) {
+    if (h === 0) return '12:00a';
+    if (h < 12) return h + ':00a';
+    if (h === 12) return '12:00p';
+    return (h - 12) + ':00p';
+  }
+
+  function renderExploreMode(hour) {
+    if (!clientRidershipModel?.stations || !clientCrimeModel?.stationRisk) return;
+    const now = new Date();
+    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][now.getDay()];
+
+    const stations = [];
+    for (const [id, station] of Object.entries(clientRidershipModel.stations)) {
+      const hourly = station.hourly?.[dow];
+      if (!hourly) continue;
+      const ridership = hourly[hour] || 0;
+      const cs = clientCrimeModel.stationRisk[id];
+      const crimeRisk = cs?.hourlyRisk?.[hour] ?? 0;
+      const safetyLevel = computeSafetyLevelClient(ridership, crimeRisk, hour);
+      stations.push({
+        id, name: station.name, lat: station.lat, lon: station.lon,
+        ridership, baseline: ridership, anomalyScore: 0, isAnomaly: false,
+        trainCount: 0, crimeRisk, crimeTotal: cs?.total || 0,
+        topCrimeType: cs?.topCrimeType || '', safetyLevel,
+        hasDisruption: false, disruptionEffect: '', disruptionRoutes: ''
+      });
+    }
+
+    const exploreData = {
+      stations,
+      totalPresence: stations.reduce((s, st) => s + st.ridership, 0),
+      anomalyCount: 0,
+      isNightMode: hour >= 22 || hour < 6,
+      safetyStats: {
+        avoid: stations.filter(s => s.safetyLevel === 'avoid').length,
+        caution: stations.filter(s => s.safetyLevel === 'caution').length,
+        safe: stations.filter(s => s.safetyLevel === 'safe').length
+      }
+    };
+
+    // Update heatmap
+    map.getSource('presence').setData(toGeoJSON(exploreData));
+
+    // Update HUD stats
+    $('presenceCount').textContent = fmt(exploreData.totalPresence);
+    $('anomalyCount').textContent = '0';
+    const ss = exploreData.safetyStats;
+    $('safetyStats').innerHTML = `<span class="safety-safe">${ss.safe}</span>/<span class="safety-caution">${ss.caution}</span>/<span class="safety-avoid">${ss.avoid}</span>`;
+
+    if (exploreData.isNightMode) {
+      $('nightBadge').style.display = '';
+      document.body.classList.add('night-mode');
+    } else {
+      $('nightBadge').style.display = 'none';
+      document.body.classList.remove('night-mode');
+    }
+  }
+
+  scrubberToggle.addEventListener('click', () => {
+    exploreMode = !exploreMode;
+    scrubberToggle.classList.toggle('active', exploreMode);
+    scrubberSlider.disabled = !exploreMode;
+    scrubberToggle.textContent = exploreMode ? 'LIVE' : 'EXPLORE';
+
+    if (exploreMode) {
+      // Enter explore: set slider to current hour
+      const h = new Date().getHours();
+      scrubberSlider.value = h;
+      scrubberTime.textContent = formatScrubberHour(h);
+      scrubberPhase.textContent = getCityPhase(h);
+      setStatus('loading', 'EXPLORE');
+      renderExploreMode(h);
+    } else {
+      // Exit explore: restore live data
+      scrubberTime.textContent = '--:00';
+      scrubberPhase.textContent = '';
+      setStatus('live', 'LIVE');
+      if (presenceData) {
+        map.getSource('presence').setData(toGeoJSON(presenceData));
+        $('presenceCount').textContent = fmt(presenceData.totalPresence);
+        $('anomalyCount').textContent = presenceData.anomalyCount || 0;
+        if (presenceData.safetyStats) {
+          const ss = presenceData.safetyStats;
+          $('safetyStats').innerHTML = `<span class="safety-safe">${ss.safe}</span>/<span class="safety-caution">${ss.caution}</span>/<span class="safety-avoid">${ss.avoid}</span>`;
+        }
+        if (presenceData.isNightMode) {
+          $('nightBadge').style.display = '';
+          document.body.classList.add('night-mode');
+        } else {
+          $('nightBadge').style.display = 'none';
+          document.body.classList.remove('night-mode');
+        }
+      }
+    }
+  });
+
+  scrubberSlider.addEventListener('input', () => {
+    if (!exploreMode) return;
+    const h = parseInt(scrubberSlider.value);
+    scrubberTime.textContent = formatScrubberHour(h);
+    scrubberPhase.textContent = getCityPhase(h);
+    $('cityPhase').textContent = getCityPhase(h);
+    renderExploreMode(h);
+  });
 })();

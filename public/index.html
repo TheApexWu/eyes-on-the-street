@@ -60,24 +60,6 @@
     .alert-badge { background: var(--text-dim); color: #fff; font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 8px; min-width: 16px; text-align: center; }
     .alert-badge.active { background: var(--red); }
 
-    /* Intel panel */
-    .intel-panel {
-      position: fixed; bottom: 20px; right: 20px; z-index: 1000;
-      background: var(--panel); backdrop-filter: blur(12px);
-      border: 1px solid var(--border); border-radius: 6px;
-      padding: 14px 16px; max-width: 380px; min-width: 300px;
-      font-size: 11px; line-height: 1.5;
-    }
-    .intel-header { font-size: 9px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-dim); margin-bottom: 8px; display: flex; justify-content: space-between; }
-    .intel-report { color: var(--text); white-space: pre-wrap; margin-bottom: 8px; }
-    .intel-report.empty { color: var(--text-dim); font-style: italic; }
-    .intel-anomalies { border-top: 1px solid var(--border); padding-top: 8px; }
-    .intel-anomaly { display: flex; justify-content: space-between; padding: 3px 0; font-size: 10px; }
-    .intel-anomaly-name { color: var(--text-dim); }
-    .intel-anomaly-score { font-weight: 500; }
-    .intel-anomaly-score.positive { color: var(--red); }
-    .intel-anomaly-score.negative { color: var(--cyan); }
-
     /* Alerts panel */
     .alerts-panel {
       position: fixed; top: 44px; right: 0; width: 380px; max-height: calc(100vh - 44px);
@@ -113,6 +95,52 @@
     .popup-anomaly.surge { background: var(--red-dim); color: var(--red); }
     .popup-anomaly.quiet { background: rgba(0,204,255,0.1); color: var(--cyan); }
 
+    /* Weather */
+    .hud-weather { display: flex; align-items: center; gap: 8px; }
+    .weather-info { font-size: 10px; color: var(--cyan); letter-spacing: 0.05em; }
+    .weather-modifier { font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 3px; background: var(--amber-dim); color: var(--amber); letter-spacing: 0.05em; }
+
+    /* Popup enhancements */
+    .popup-section { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); }
+    .popup-section-title { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-dim); margin-bottom: 4px; }
+    .popup-disruption { background: var(--amber-dim); border: 1px solid var(--amber); border-radius: 3px; padding: 6px 8px; margin-bottom: 6px; font-size: 10px; color: var(--amber); }
+    .popup-disruption-routes { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+    .popup-disruption-route { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; }
+    .popup-weather-impact { font-size: 10px; color: var(--cyan); }
+    .popup-safest-hours { display: flex; gap: 6px; margin-top: 2px; }
+    .popup-hour-chip { font-size: 10px; padding: 2px 6px; border-radius: 3px; background: var(--green-dim); color: var(--green); font-weight: 500; }
+    .popup-alternative { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; cursor: pointer; font-size: 10px; }
+    .popup-alternative:hover { color: var(--green); }
+    .popup-alt-name { flex: 1; }
+    .popup-alt-dist { color: var(--text-dim); font-size: 9px; margin-left: 8px; }
+    .popup-alt-safety { width: 6px; height: 6px; border-radius: 50%; margin-left: 6px; }
+
+    /* Time scrubber */
+    .time-scrubber {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 1000;
+      background: var(--panel); backdrop-filter: blur(12px); border: 1px solid var(--border);
+      border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; gap: 12px;
+      font-size: 11px; min-width: 360px;
+    }
+    .scrubber-toggle {
+      background: none; border: 1px solid var(--border); border-radius: 4px;
+      color: var(--text-dim); font-family: var(--font); font-size: 9px; font-weight: 600;
+      letter-spacing: 0.1em; padding: 4px 8px; cursor: pointer; text-transform: uppercase;
+      transition: all 0.2s;
+    }
+    .scrubber-toggle.active { border-color: var(--cyan); color: var(--cyan); background: rgba(0,204,255,0.1); }
+    .scrubber-slider {
+      flex: 1; -webkit-appearance: none; appearance: none; height: 4px;
+      background: var(--border); border-radius: 2px; outline: none; cursor: pointer;
+    }
+    .scrubber-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: var(--cyan); cursor: pointer; border: 2px solid var(--panel);
+    }
+    .scrubber-slider:disabled { opacity: 0.3; cursor: default; }
+    .scrubber-time { min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; color: var(--cyan); font-weight: 500; }
+    .scrubber-phase { font-size: 9px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; min-width: 90px; }
+
     /* Controls */
     .rotate-controls { position: fixed; bottom: 20px; left: 20px; z-index: 1000; display: flex; gap: 8px; }
     .rotate-btn { width: 52px; height: 52px; border-radius: 8px; background: var(--panel); backdrop-filter: blur(12px); border: 1px solid var(--border); color: var(--text); font-family: var(--font); font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: border-color 0.2s, color 0.2s; user-select: none; }
@@ -142,7 +170,6 @@
 
     /* Night mode */
     body.night-mode .hud { border-bottom-color: rgba(255,34,68,0.2); }
-    body.night-mode .intel-panel { border-color: rgba(255,34,68,0.15); }
     body.night-mode .hud-title { color: var(--red); }
 
     /* Token warning */
@@ -170,6 +197,11 @@
       </div>
       <div class="hud-divider"></div>
       <span id="cityPhase" style="color:var(--amber);font-size:10px;letter-spacing:0.1em;text-transform:uppercase"></span>
+      <div class="hud-weather" id="weatherHud" style="display:none">
+        <div class="hud-divider"></div>
+        <span class="weather-info" id="weatherInfo"></span>
+        <span class="weather-modifier" id="weatherModifier"></span>
+      </div>
     </div>
     <div class="hud-right">
       <div class="hud-stat"><span class="label">Presence</span><span class="val" id="presenceCount">--</span></div>
@@ -188,15 +220,6 @@
     </div>
   </div>
 
-  <div class="intel-panel">
-    <div class="intel-header">
-      <span>Intelligence</span>
-      <span class="intel-time" id="intelTime"></span>
-    </div>
-    <div class="intel-report empty" id="intelReport">Awaiting first analysis...</div>
-    <div class="intel-anomalies" id="intelAnomalies"></div>
-  </div>
-
   <div class="alerts-panel" id="alertsPanel">
     <div class="alerts-panel-header">
       <span>Service Alerts</span>
@@ -213,6 +236,13 @@
   <div class="rotate-controls">
     <button class="rotate-btn" id="rotateCCW" title="Rotate left">&#x21BA;</button>
     <button class="rotate-btn" id="rotateCW" title="Rotate right">&#x21BB;</button>
+  </div>
+
+  <div class="time-scrubber" id="timeScrubber">
+    <button class="scrubber-toggle" id="scrubberToggle">EXPLORE</button>
+    <input type="range" class="scrubber-slider" id="scrubberSlider" min="0" max="23" value="12" disabled>
+    <span class="scrubber-time" id="scrubberTime">--:00</span>
+    <span class="scrubber-phase" id="scrubberPhase"></span>
   </div>
 
   <div id="map"></div>

@@ -124,7 +124,11 @@ function computeStationRisk(stations, crimes) {
       total: 0,
       totalWeighted: 0,
       topCrimeType: null,
-      crimeTypes: {}
+      crimeTypes: {},
+      // Hourly breakdowns (recency-weighted counts)
+      hourly: new Array(24).fill(0),
+      weekdayHourly: new Array(24).fill(0),
+      weekendHourly: new Array(24).fill(0)
     };
   }
 
@@ -141,6 +145,12 @@ function computeStationRisk(stations, crimes) {
 
     const weight = recencyWeight(crime.cmplnt_fr_dt);
 
+    // Parse hour for hourly breakdown
+    const crimeHour = crime.cmplnt_fr_tm ? parseInt(crime.cmplnt_fr_tm.split(':')[0]) : null;
+    // Determine weekday vs weekend from complaint date
+    const crimeDate = crime.cmplnt_fr_dt ? new Date(crime.cmplnt_fr_dt) : null;
+    const isWeekend = crimeDate ? (crimeDate.getDay() === 0 || crimeDate.getDay() === 6) : false;
+
     // Find all stations within radius
     for (const [id, station] of stationEntries) {
       // Quick bounding box check first
@@ -153,6 +163,16 @@ function computeStationRisk(stations, crimes) {
         stationRisk[id].total++;
         stationRisk[id].totalWeighted += weight;
         matched++;
+
+        // Hourly breakdown
+        if (crimeHour !== null) {
+          stationRisk[id].hourly[crimeHour] += weight;
+          if (isWeekend) {
+            stationRisk[id].weekendHourly[crimeHour] += weight;
+          } else {
+            stationRisk[id].weekdayHourly[crimeHour] += weight;
+          }
+        }
 
         const type = crime.ofns_desc || 'OTHER';
         stationRisk[id].crimeTypes[type] = (stationRisk[id].crimeTypes[type] || 0) + weight;
@@ -174,6 +194,23 @@ function computeStationRisk(stations, crimes) {
     // Assign absolute risk tier based on recency-weighted total
     stationRisk[id].riskTier = absoluteRiskTier(stationRisk[id].totalWeighted);
     delete stationRisk[id].crimeTypes; // don't ship raw types to client
+  }
+
+  // Normalize hourly arrays to 0-1 per station (relative to that station's peak hour)
+  for (const id in stationRisk) {
+    const s = stationRisk[id];
+    const normalizeArray = (arr) => {
+      const max = Math.max(...arr);
+      if (max <= 0) return arr.map(() => 0);
+      return arr.map(v => Math.round((v / max) * 1000) / 1000);
+    };
+    s.hourlyRisk = normalizeArray(s.hourly);
+    s.weekdayRisk = normalizeArray(s.weekdayHourly);
+    s.weekendRisk = normalizeArray(s.weekendHourly);
+    // Remove raw weighted counts — only ship normalized values
+    delete s.hourly;
+    delete s.weekdayHourly;
+    delete s.weekendHourly;
   }
 
   // Normalize each time window to 0-1 scale (relative to max station)

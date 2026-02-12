@@ -1,50 +1,10 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const AnthropicModule = require('@anthropic-ai/sdk');
-const Anthropic = AnthropicModule.default || AnthropicModule;
 const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
-const { Redis } = require('@upstash/redis');
-const rateLimit = require('express-rate-limit');
 const compression = require('compression');
 const fs = require('fs');
 const path = require('path');
-
-// ---------------------------------------------------------------------------
-// PERSISTENT STATE (Upstash Redis — optional, degrades gracefully)
-// ---------------------------------------------------------------------------
-let redis = null;
-if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-  redis = new Redis({
-    url: process.env.KV_REST_API_URL,
-    token: process.env.KV_REST_API_TOKEN
-  });
-  console.log('[redis] connected');
-}
-
-async function persistHistory(history) {
-  if (!redis) return;
-  try {
-    await redis.set('intel:history', JSON.stringify(history), { ex: 86400 }); // 24h TTL
-  } catch (err) {
-    console.error('[redis] persist failed:', err.message);
-  }
-}
-
-async function loadHistory() {
-  if (!redis) return [];
-  try {
-    const data = await redis.get('intel:history');
-    if (data) {
-      const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-      console.log(`[redis] loaded ${parsed.length} historical reports`);
-      return parsed;
-    }
-  } catch (err) {
-    console.error('[redis] load failed:', err.message);
-  }
-  return [];
-}
 
 const app = express();
 app.disable('x-powered-by');
@@ -479,7 +439,7 @@ function extractAlerts(feed) {
 }
 
 // ---------------------------------------------------------------------------
-// /api/presence - The core intelligence endpoint
+// /api/presence - The core endpoint
 // ---------------------------------------------------------------------------
 async function computePresence() {
   if (!ridershipModel || !ridershipModel.stations) {
@@ -538,6 +498,40 @@ async function computePresence() {
     console.log(`[presence] train modulation: ${totalTrains} train arrivals across ${matchedCount} station complexes`);
   }
 
+  const isNight = hour >= 22 || hour < 6;
+
+  // Build disruption map from active alerts
+  let disruptedComplexes = {};
+  try {
+    const alertData = cache['alerts'] && (Date.now() - cache['alerts'].ts < 60000)
+      ? cache['alerts'].data
+      : await computeAlerts();
+    for (const alert of (alertData.alerts || [])) {
+      if (!alert.affectedStops?.length) continue;
+      const effect = alert.effect; // 'No Service', 'Significant Delays', etc.
+      for (const stopId of alert.affectedStops) {
+        const baseStop = stopId.replace(/[NS]$/, '');
+        const complexId = gtfsStopToComplex[baseStop] || gtfsStopToComplex[stopId];
+        if (!complexId) continue;
+        if (!disruptedComplexes[complexId]) {
+          disruptedComplexes[complexId] = { effect, routes: [] };
+        }
+        // Escalate: No Service > Significant Delays > others
+        if (effect === 'No Service') disruptedComplexes[complexId].effect = 'No Service';
+        else if (effect === 'Significant Delays' && disruptedComplexes[complexId].effect !== 'No Service') {
+          disruptedComplexes[complexId].effect = 'Significant Delays';
+        }
+        for (const r of (alert.affectedRoutes || [])) {
+          if (!disruptedComplexes[complexId].routes.includes(r)) {
+            disruptedComplexes[complexId].routes.push(r);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[presence] alert cross-reference error:', err.message);
+  }
+
   const stationList = [];
   let totalPresence = 0;
   let anomalyCount = 0;
@@ -579,13 +573,25 @@ async function computePresence() {
     }
     if (isAnomaly) anomalyCount++;
 
-    // Crime risk for this station at this time window
-    const timeWindow = getTimeWindow(hour);
+    // Crime risk for this station — prefer hourly granularity, fall back to time window
     const crimeData = crimeModel?.stationRisk?.[id];
-    const crimeRisk = crimeData?.[timeWindow + 'Risk'] || 0;
+    const crimeRisk = crimeData?.hourlyRisk?.[hour] ?? crimeData?.[getTimeWindow(hour) + 'Risk'] ?? 0;
     const crimeTotal = crimeData?.total || 0;
     const topCrimeType = crimeData?.topCrimeType || null;
-    const safetyLevel = computeSafetyLevel(ridership, crimeRisk, hour);
+    let safetyLevel = computeSafetyLevel(ridership, crimeRisk, hour);
+
+    // Alert-aware risk elevation
+    const disruption = disruptedComplexes[id];
+    if (disruption) {
+      if (disruption.effect === 'No Service') {
+        // No Service: escalate one tier
+        if (safetyLevel === 'safe') safetyLevel = 'caution';
+        else if (safetyLevel === 'caution') safetyLevel = 'avoid';
+      } else if (disruption.effect === 'Significant Delays' && isNight) {
+        // Significant Delays at night only: safe → caution
+        if (safetyLevel === 'safe') safetyLevel = 'caution';
+      }
+    }
 
     stationList.push({
       id,
@@ -600,7 +606,10 @@ async function computePresence() {
       crimeRisk: Math.round(crimeRisk * 1000) / 1000,
       crimeTotal,
       topCrimeType,
-      safetyLevel
+      safetyLevel,
+      hasDisruption: !!disruption,
+      disruptionEffect: disruption?.effect || null,
+      disruptionRoutes: disruption?.routes || null
     });
 
     totalPresence += ridership;
@@ -608,7 +617,7 @@ async function computePresence() {
 
   stationList.sort((a, b) => b.ridership - a.ridership);
 
-  const isNightMode = hour >= 22 || hour < 6;
+  const isNightMode = isNight;
   const avoidCount = stationList.filter(s => s.safetyLevel === 'avoid').length;
   const cautionCount = stationList.filter(s => s.safetyLevel === 'caution').length;
 
@@ -627,215 +636,6 @@ async function computePresence() {
 }
 
 app.get('/api/presence', cached('presence', 30000, computePresence));
-
-// ---------------------------------------------------------------------------
-// /api/intelligence - Claude narrative
-// ---------------------------------------------------------------------------
-let intelligenceCache = null;
-let intelligenceCacheTs = 0;
-const INTELLIGENCE_TTL = 5 * 60 * 1000;
-let intelligenceHistory = []; // Rolling buffer of last 3 reports for trend detection
-const MAX_HISTORY = 3;
-let historyLoaded = false;
-
-// Rate limit: max 20 intelligence requests per IP per 5 minutes (protects API credits)
-const intelLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000,
-  max: 20,
-  message: { error: 'Rate limit exceeded. Try again shortly.' },
-  standardHeaders: true,
-  legacyHeaders: false
-});
-
-app.get('/api/intelligence', intelLimiter, async (req, res) => {
-  res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=120');
-  const now = Date.now();
-  if (intelligenceCache && now - intelligenceCacheTs < INTELLIGENCE_TTL) {
-    return res.json(intelligenceCache);
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.json({ report: null, anomalies: [], generated: now, error: 'No API key configured' });
-  }
-
-  // Load history from Redis on first request (survives cold starts)
-  if (!historyLoaded && redis) {
-    const stored = await loadHistory();
-    if (stored.length > 0) intelligenceHistory = stored;
-    historyLoaded = true;
-  }
-
-  try {
-    // Use cached presence data if available; only compute if no cache exists.
-    // This prevents the intelligence endpoint from doing heavy GTFS fetches
-    // during a cold start (which would exceed Vercel's function timeout).
-    let presenceData;
-    if (cache['presence'] && Date.now() - cache['presence'].ts < 120000) {
-      presenceData = cache['presence'].data;
-    } else {
-      try {
-        presenceData = await computePresence();
-        cache['presence'] = { data: presenceData, ts: Date.now() };
-      } catch (presErr) {
-        console.error('[intelligence] presence computation failed:', presErr.message);
-        return res.json({ report: null, anomalies: [], generated: now, error: 'Warming up, try again shortly' });
-      }
-    }
-
-    const topStations = presenceData.stations.slice(0, 10);
-    const anomalies = presenceData.stations.filter(s => s.isAnomaly);
-    const totalPresence = presenceData.totalPresence;
-    const hour = presenceData.hour;
-    const dayOfWeek = presenceData.dayOfWeek;
-
-    // Fetch service alerts (use cache if available, don't fail if unavailable)
-    let alertsData = { alerts: [] };
-    try {
-      if (cache['alerts'] && Date.now() - cache['alerts'].ts < 120000) {
-        alertsData = cache['alerts'].data;
-      } else {
-        alertsData = await computeAlerts();
-        cache['alerts'] = { data: alertsData, ts: Date.now() };
-      }
-    } catch (alertErr) {
-      console.error('[intelligence] alerts fetch failed:', alertErr.message);
-    }
-
-    // Build alert summary for Claude — critical and high severity only
-    const significantAlerts = alertsData.alerts.filter(a =>
-      a.severity === 'critical' || a.severity === 'high'
-    ).slice(0, 10);
-
-    const alertSummary = significantAlerts.length > 0
-      ? significantAlerts.map(a =>
-          `[${a.severity.toUpperCase()}] ${a.effect} on ${a.affectedRoutes.join(',')} — ${a.header.slice(0, 120)}`
-        ).join('\n')
-      : 'No critical service disruptions.';
-
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-    const stationSummary = topStations.map(s =>
-      `${s.name}: ${s.ridership.toLocaleString()} riders (baseline: ${s.baseline.toLocaleString()}, ${s.anomalyScore > 0 ? '+' : ''}${Math.round(s.anomalyScore * 100)}%) [safety: ${s.safetyLevel}]`
-    ).join('\n');
-
-    const anomalySummary = anomalies.length > 0
-      ? anomalies.slice(0, 5).map(s =>
-          `${s.name}: ${s.anomalyScore > 0 ? '+' : ''}${Math.round(s.anomalyScore * 100)}% vs baseline`
-        ).join('\n')
-      : 'No significant anomalies.';
-
-    const avoidStations = presenceData.stations.filter(s => s.safetyLevel === 'avoid').slice(0, 8);
-    const safetySummary = avoidStations.length > 0
-      ? avoidStations.map(s =>
-          `${s.name}: ${s.ridership} riders/hr, crime risk ${Math.round(s.crimeRisk * 100)}%${s.topCrimeType ? ' (' + s.topCrimeType.toLowerCase() + ')' : ''}`
-        ).join('\n')
-      : 'No stations flagged.';
-
-    const isNight = hour >= 22 || hour < 6;
-
-    // Build temporal context from previous reports
-    const historySummary = intelligenceHistory.length > 0
-      ? intelligenceHistory.map(h => {
-          const age = Math.round((now - h.ts) / 60000);
-          return `[${age}min ago | presence: ${h.totalPresence.toLocaleString()} | anomalies: ${h.anomalyCount}] ${h.report.slice(0, 150)}...`;
-        }).join('\n')
-      : 'No previous reports (first analysis of this session).';
-
-    // Compute data confidence level
-    const hasTrainData = (presenceData.trainComplexCount || 0) > 0;
-    const hasWeather = !!presenceData.weather;
-    const hasHistory = intelligenceHistory.length > 0;
-    const confidence = hasTrainData ? 'HIGH' : 'MODERATE';
-    const dataSources = [
-      'ridership model',
-      hasTrainData ? 'live GTFS-RT' : null,
-      hasWeather ? 'weather' : null,
-      'crime model',
-      significantAlerts.length > 0 ? 'service alerts' : null,
-      hasHistory ? `${intelligenceHistory.length} prior reports` : null
-    ].filter(Boolean).join(', ');
-
-    const message = await client.messages.create({
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 500,
-      system: `You are an urban intelligence analyst monitoring NYC subway crowd flow and street safety in real time. Write a structured situation report. Use short declarative sentences. No greetings, no hedging. No em dashes. No markdown bold/headers.
-
-Your audience includes newcomers to NYC who rely on this for personal safety decisions.
-
-You have access to previous reports. Use them to identify TRENDS: is crowd presence growing or shrinking? Are anomalies persisting or resolving? Reference changes when notable.
-
-OUTPUT FORMAT (use these exact section labels on their own lines):
-SITUATION: 2-3 sentences. System state, crowd levels, trend direction vs previous reports, weather impact if applicable.
-ASSESSMENT: 2-3 sentences. Anomaly analysis, service disruption impact, threat assessment. What is causing current patterns and what do they mean for safety.
-RECOMMENDATION: 2-3 sentences. Specific actionable guidance. Which corridors/stations are safe, which to avoid. Use compass directions and neighborhood names.${isNight ? '\nNIGHT ADVISORY: Which areas to avoid and which corridors remain well-populated.' : ''}
-
-End with: [${confidence} CONFIDENCE — ${dataSources}]`,
-      messages: [{
-        role: 'user',
-        content: `Current time: ${dayOfWeek} ${String(hour).padStart(2, '0')}:00
-${isNight ? '*** NIGHT MODE ACTIVE ***' : ''}
-Total estimated street presence: ${totalPresence.toLocaleString()}
-
-Weather: ${presenceData.weather ? `${presenceData.weather.condition} (${presenceData.weather.description}), ${presenceData.weather.temp}°F feels like ${presenceData.weather.feelsLike}°F, wind ${presenceData.weather.windSpeed}mph${presenceData.weather.isRain ? ' [RAIN: presence estimates reduced 20%]' : ''}${presenceData.weather.isSnow ? ' [SNOW: presence estimates reduced 30%]' : ''}${presenceData.weather.isExtreme ? ' [EXTREME CONDITIONS]' : ''}` : 'Weather data unavailable'}
-
-Previous reports:
-${historySummary}
-
-Top 10 busiest stations:
-${stationSummary}
-
-Anomalies:
-${anomalySummary}
-
-Active service disruptions (${significantAlerts.length} critical/high):
-${alertSummary}
-Total alerts across system: ${alertsData.alerts.length}
-
-Stations flagged AVOID (low presence + elevated crime risk):
-${safetySummary}
-
-Safety stats: ${presenceData.safetyStats.safe} safe, ${presenceData.safetyStats.caution} caution, ${presenceData.safetyStats.avoid} avoid
-
-Write the situation report.`
-      }]
-    });
-
-    const report = message.content[0].text;
-
-    // Push to history buffer for temporal trend detection
-    intelligenceHistory.push({
-      ts: now,
-      report,
-      totalPresence,
-      anomalyCount: anomalies.length
-    });
-    if (intelligenceHistory.length > MAX_HISTORY) intelligenceHistory.shift();
-    persistHistory(intelligenceHistory); // async, fire-and-forget
-
-    intelligenceCache = {
-      report,
-      anomalies: anomalies.map(s => ({
-        id: s.id,
-        name: s.name,
-        score: s.anomalyScore,
-        ridership: s.ridership,
-        baseline: s.baseline
-      })),
-      generated: now
-    };
-    intelligenceCacheTs = now;
-
-    res.json(intelligenceCache);
-  } catch (err) {
-    console.error('[intelligence] error:', err.message, err.status || '', err.error || '');
-    res.json({
-      report: null,
-      anomalies: [],
-      generated: now,
-      error: 'Analysis temporarily unavailable'
-    });
-  }
-});
 
 // ---------------------------------------------------------------------------
 // Static endpoints
@@ -858,25 +658,18 @@ app.get('/health', (req, res) => {
   res.sendStatus(200);
 });
 
-// Diagnostic: check what's happening with the intelligence pipeline
 // Debug endpoint: local dev only (blocked in production)
 app.get('/api/debug', (req, res) => {
   if (process.env.VERCEL) {
     return res.status(404).json({ error: 'Not found' });
   }
-  const hasKey = !!process.env.ANTHROPIC_API_KEY;
   const hasModel = !!ridershipModel && Object.keys(ridershipModel.stations || {}).length > 0;
   const hasCrime = !!crimeModel && Object.keys(crimeModel.stationRisk || {}).length > 0;
   const hasPresenceCache = !!cache['presence'];
-  const hasIntelCache = !!intelligenceCache;
   res.json({
-    anthropicKey: hasKey ? 'SET' : 'MISSING',
     ridershipModel: hasModel ? Object.keys(ridershipModel.stations).length + ' stations' : 'NOT LOADED',
     crimeModel: hasCrime ? Object.keys(crimeModel.stationRisk).length + ' stations' : 'NOT LOADED',
     presenceCached: hasPresenceCache,
-    intelligenceCached: hasIntelCache,
-    intelligenceCacheAge: hasIntelCache ? Math.round((Date.now() - intelligenceCacheTs) / 1000) + 's' : null,
-    redis: !!redis,
     nodeVersion: process.version
   });
 });
@@ -891,7 +684,7 @@ if (!process.env.VERCEL) {
   const PORT = process.env.PORT || 3000;
   stationInit.then(() => {
     app.listen(PORT, () => {
-      console.log(`\n  EYES ON THE STREET v2`);
+      console.log(`\n  EYES ON THE STREET v3`);
       console.log(`  http://localhost:${PORT}\n`);
     });
   });
