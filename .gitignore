@@ -6,3 +6,8 @@ node_modules/
 .env*.local
 python/__pycache__/
 *.pyc
+
+# Personal docs — not for public repo
+EYES-BIBLE.md
+PLAN.md
+public/glow-catalog.html
